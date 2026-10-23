@@ -102,6 +102,29 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
 .hero-equity { margin: 6px 0 0; font-size: 15px; font-weight: 600; color: var(--muted); }
 .hero-equity b { color: var(--text); font-weight: 800; }
 
+/* Tabs + budget */
+.tabs { max-width: 560px; margin: 0 auto; padding: 14px 18px 0; }
+.tab-seg button { font-size: 15px; font-weight: 800; padding: 9px; }
+.b-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 11px 0; border-top: 1px solid var(--line); cursor: pointer; -webkit-tap-highlight-color: transparent; }
+.b-row.child { padding-left: 14px; }
+.b-row.child .b-name { font-weight: 500; }
+.b-name { font-weight: 600; min-width: 0; }
+.b-sub { font-size: 12px; color: var(--muted); font-weight: 500; margin-top: 1px; }
+.b-note { font-size: 12px; color: var(--down); font-weight: 600; margin-top: 1px; }
+.b-amt { font-weight: 700; flex-shrink: 0; text-align: right; }
+.b-caret { color: var(--muted); font-size: 12px; margin-left: 6px; }
+.pay-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.pay-grid div { background: var(--surface-2); border-radius: 12px; padding: 10px 12px; }
+.pay-grid span { display: block; font-size: 12px; color: var(--muted); font-weight: 600; }
+.pay-grid b { display: block; font-size: 17px; font-weight: 800; }
+.pay-grid em { display: block; font-style: normal; font-size: 13px; font-weight: 700; }
+.pay-grid em.up, .b-pos { color: var(--up); }
+.pay-grid em.down, .b-neg { color: var(--down); }
+.card-title { margin: 0 0 10px; font-size: 13px; color: var(--muted); font-weight: 700; }
+.joint-line { display: flex; justify-content: space-between; font-weight: 700; padding: 4px 0; }
+.toggle-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+.toggle-row label { color: var(--muted); font-size: 14px; font-weight: 600; }
+
 /* Chart */
 .chart-wrap { margin: 18px 0 6px; }
 .chart { width: 100%; height: 170px; display: block; overflow: visible; }
@@ -229,7 +252,14 @@ details.history[open] summary::after { content: "Hide"; }
 </style>
 </head>
 <body>
+<nav class="tabs" aria-label="Sections">
+  <div class="seg tab-seg" role="group">
+    <button data-tab="nw" aria-pressed="true">Net Worth</button>
+    <button data-tab="budget" aria-pressed="false">Budget</button>
+  </div>
+</nav>
 <main id="app"><p class="loading">Loading…</p></main>
+<main id="budgetApp" hidden><p class="loading">Loading…</p></main>
 
 <div class="overlay" id="overlay" role="dialog" aria-modal="true">
   <div class="sheet" id="sheet"></div>
@@ -412,7 +442,7 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
       if (e.code === "conflict") {
         toast("The file changed somewhere else. Reloading the latest version.");
         loadFromOneDrive();
-      } else toast(navigator.onLine ? "Couldn’t save to OneDrive. Try again." : "You’re offline. Connect to save.");
+      } else toast(navigator.onLine ? `Couldn’t save to OneDrive (${e.message}). Screenshot this.` : "You’re offline. Connect to save.");
     });
     return writeChain;
   }
@@ -984,6 +1014,9 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
     }
   }
 
+  // Shared with the Budget tab
+  window.NW = { readFile, writeFile, parseCSV, toCSV, toast, openSheet, closeSheet, esc };
+
   // ---------- boot ----------
   async function loadFromOneDrive() {
     try {
@@ -1003,6 +1036,7 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
       try { localStorage.setItem(CACHE_KEY, JSON.stringify(state)); } catch (e) {}
       loaded = true;
       if (!$overlay.classList.contains("open")) render();
+      window.dispatchEvent(new Event("nw-ready"));
     } catch (e) {
       if (e.message === "redirecting") return;
       const cached = (() => { try { return JSON.parse(localStorage.getItem(CACHE_KEY)); } catch (x) { return null; } })();
@@ -1035,6 +1069,296 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
     if (!account) return renderSignIn();
     loadFromOneDrive();
   })();
+})();
+</script>
+<script>
+// ===================== Budget tab =====================
+(() => {
+  const $b = document.getElementById("budgetApp");
+  const $nw = document.getElementById("app");
+  const SECTIONS = [
+    { id: "necessity", name: "Necessities", color: "#64D2FF" },
+    { id: "discretionary", name: "Discretionary", color: "#FF9F0A" },
+    { id: "savings", name: "Savings", color: "#30D158" },
+  ];
+  const VIEWS = [["household", "Household"], ["kyle", "Kyle"], ["victoria", "Victoria"]];
+  let items = [], settings = { kyle_gross: 0, victoria_gross: 0, kyle_net: 0, victoria_net: 0 };
+  let etag = { items: null, settings: null }, loaded = false, loading = false, ready = false;
+  let view = "household", openGroups = new Set(), chain = Promise.resolve();
+  const api = () => window.NW;
+  const fmt = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const fmt0 = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
+  const num = v => { const n = parseFloat(String(v ?? "").replace(/[$,\s]/g, "")); return isNaN(n) ? 0 : Math.round(n * 100) / 100; };
+  const kyleAmt = i => i.kyle_p1 + i.kyle_p2;
+  const amt = i => (view === "kyle" ? kyleAmt(i) : view === "victoria" ? i.victoria : kyleAmt(i) + i.victoria);
+  const income = () => (view === "kyle" ? settings.kyle_net : view === "victoria" ? settings.victoria_net : settings.kyle_net + settings.victoria_net);
+  const newId = () => "b" + Math.random().toString(36).slice(2, 9);
+
+  // ---------- tabs ----------
+  document.querySelectorAll("[data-tab]").forEach(btn => btn.onclick = () => {
+    const tab = btn.dataset.tab;
+    document.querySelectorAll("[data-tab]").forEach(b => b.setAttribute("aria-pressed", b.dataset.tab === tab));
+    $nw.hidden = tab !== "nw";
+    $b.hidden = tab !== "budget";
+    if (tab === "budget" && ready && !loaded && !loading) load();
+    window.scrollTo(0, 0);
+  });
+  window.addEventListener("nw-ready", () => { ready = true; if (!$b.hidden && !loaded && !loading) load(); });
+
+  // ---------- data ----------
+  function fromCSV(itemsText, settingsText) {
+    const a = api();
+    const list = itemsText ? a.parseCSV(itemsText).map(r => ({
+      id: r.id, name: r.name, section: SECTIONS.some(s => s.id === r.section) ? r.section : "necessity",
+      group: r.group || "", kyle_p1: num(r.kyle_p1), kyle_p2: num(r.kyle_p2), victoria: num(r.victoria),
+      joint: /^(true|yes|1)$/i.test(r.joint || ""), method: r.method || "", note: r.note || "",
+    })).filter(i => i.id && i.name) : [];
+    const set = { kyle_gross: 0, victoria_gross: 0, kyle_net: 0, victoria_net: 0 };
+    if (settingsText) a.parseCSV(settingsText).forEach(r => { if (r.key) set[r.key] = num(r.value); });
+    return { list, set };
+  }
+
+  async function load() {
+    loading = true;
+    $b.innerHTML = `<p class="loading">Loading…</p>`;
+    try {
+      const a = api();
+      const [it, st] = await Promise.all([a.readFile("budget.csv"), a.readFile("budget-settings.csv")]);
+      etag = { items: it.etag, settings: st.etag };
+      const d = fromCSV(it.text, st.text);
+      items = d.list; settings = d.set;
+      loaded = true;
+      render();
+    } catch (e) {
+      if (e.message === "redirecting") return;
+      $b.innerHTML = `<section class="notice"><h2>Couldn’t load your budget</h2><p>Check your connection and reopen the app.</p></section>`;
+    } finally { loading = false; }
+  }
+
+  function save() {
+    const a = api();
+    const itemsCSV = a.toCSV(["id", "name", "section", "group", "kyle_p1", "kyle_p2", "victoria", "joint", "method", "note"],
+      items.map(i => [i.id, i.name, i.section, i.group, i.kyle_p1.toFixed(2), i.kyle_p2.toFixed(2), i.victoria.toFixed(2), i.joint ? "true" : "false", i.method, i.note]));
+    const setCSV = a.toCSV(["key", "value"], Object.entries(settings).map(([k, v]) => [k, String(v)]));
+    a.toast("Saving…");
+    chain = chain.then(async () => {
+      etag.items = await a.writeFile("budget.csv", itemsCSV, etag.items);
+      etag.settings = await a.writeFile("budget-settings.csv", setCSV, etag.settings);
+      a.toast("Saved to OneDrive");
+    }).catch(e => {
+      if (e.message === "redirecting") return;
+      if (e.code === "conflict") { a.toast("The budget changed somewhere else. Reloading."); load(); }
+      else a.toast(`Couldn’t save the budget (${e.message})`);
+    });
+    return chain;
+  }
+
+  // ---------- render ----------
+  function subLine(i) {
+    const parts = [];
+    if (view === "household" && kyleAmt(i) && i.victoria) parts.push(`Kyle ${fmt.format(kyleAmt(i))}, Victoria ${fmt.format(i.victoria)}`);
+    if (view === "kyle" && i.kyle_p1 && i.kyle_p2) parts.push(`Paycheck 1 ${fmt.format(i.kyle_p1)}, Paycheck 2 ${fmt.format(i.kyle_p2)}`);
+    else if (view === "kyle" && (i.kyle_p1 || i.kyle_p2)) parts.push(i.kyle_p1 ? "Paycheck 1" : "Paycheck 2");
+    if (i.method) parts.push(i.method);
+    if (i.joint) parts.push("Joint account");
+    return parts.join(". ");
+  }
+
+  function itemRow(i, child) {
+    const esc = api().esc, sub = subLine(i);
+    return `<div class="b-row${child ? " child" : ""}" data-edit="${i.id}" role="button" tabindex="0">
+      <div class="b-name">${esc(i.name)}${sub ? `<div class="b-sub">${esc(sub)}</div>` : ""}${i.note ? `<div class="b-note">${esc(i.note)}</div>` : ""}</div>
+      <div class="b-amt num">${fmt.format(amt(i))}</div></div>`;
+  }
+
+  function render() {
+    if (!loaded) return;
+    const a = api(), esc = a.esc;
+    if (!items.length && !(settings.kyle_net || settings.victoria_net)) return renderEmpty();
+
+    const inc = income();
+    const live = items.filter(i => amt(i) > 0.004);
+    const idle = items.filter(i => amt(i) <= 0.004);
+    const totals = Object.fromEntries(SECTIONS.map(s => [s.id, live.filter(i => i.section === s.id).reduce((t, i) => t + amt(i), 0)]));
+    const budgeted = totals.necessity + totals.discretionary + totals.savings;
+    const remaining = Math.round((inc - budgeted) * 100) / 100;
+    const rate = inc ? totals.savings / inc : 0;
+    const label = view === "household" ? "Household" : view === "kyle" ? "Kyle’s" : "Victoria’s";
+
+    let remainHtml;
+    if (Math.abs(remaining) < 0.01) remainHtml = `<span class="b-pos">Every dollar assigned</span>`;
+    else if (remaining > 0) remainHtml = `<span class="b-pos num">${fmt.format(remaining)} unassigned</span>`;
+    else remainHtml = `<span class="b-neg num">${fmt.format(-remaining)} over income</span>`;
+
+    const allocHtml = budgeted ? `<section class="alloc">
+      <div class="alloc-bar">${SECTIONS.map(s => `<span style="width:${(totals[s.id] / budgeted) * 100}%;background:${s.color}"></span>`).join("")}</div>
+      <div class="alloc-legend">${SECTIONS.map(s => `<span><i class="dot" style="background:${s.color}"></i>${s.name} <b class="num">${inc ? Math.round((totals[s.id] / inc) * 100) : 0}%</b></span>`).join("")}</div>
+    </section>` : "";
+
+    let payHtml = "";
+    if (view === "kyle") {
+      const half = settings.kyle_net / 2;
+      const p1 = live.reduce((t, i) => t + i.kyle_p1, 0), p2 = live.reduce((t, i) => t + i.kyle_p2, 0);
+      const cell = (n, spent) => { const left = half - spent; return `<div><span>${n}</span><b class="num">${fmt.format(spent)}</b>
+        <em class="num ${left >= -0.004 ? "up" : "down"}">${left >= -0.004 ? fmt.format(left) + " left" : fmt.format(-left) + " short"}</em></div>`; };
+      payHtml = `<section class="alloc"><p class="card-title">Per paycheck (${fmt.format(half)} each)</p>
+        <div class="pay-grid">${cell("Paycheck 1 (1st–15th)", p1)}${cell("Paycheck 2 (16th–31st)", p2)}</div></section>`;
+    }
+
+    const joint = live.filter(i => i.joint);
+    let jointHtml = "";
+    if (joint.length) {
+      const k = joint.reduce((t, i) => t + kyleAmt(i), 0), v = joint.reduce((t, i) => t + i.victoria, 0);
+      const lines = view === "household" ? [["Kyle", k], ["Victoria", v], ["Total", k + v]] : view === "kyle" ? [["Kyle", k]] : [["Victoria", v]];
+      jointHtml = `<section class="alloc"><p class="card-title">Pay into the joint account each month</p>
+        ${lines.map(([n, x]) => `<div class="joint-line"><span>${n}</span><span class="num">${fmt.format(x)}</span></div>`).join("")}</section>`;
+    }
+
+    const sectionHtml = s => {
+      const list = live.filter(i => i.section === s.id);
+      if (!list.length) return "";
+      const seen = new Set(), rows = [];
+      list.forEach(i => {
+        if (!i.group) { rows.push(itemRow(i)); return; }
+        if (seen.has(i.group)) return;
+        seen.add(i.group);
+        const kids = list.filter(x => x.group === i.group);
+        const open = openGroups.has(s.id + "|" + i.group);
+        rows.push(`<div class="b-row" data-group="${esc(s.id + "|" + i.group)}" role="button" tabindex="0" aria-expanded="${open}">
+          <div class="b-name">${esc(i.group)}<span class="b-caret">${open ? "▲" : "▼"} ${kids.length}</span></div>
+          <div class="b-amt num">${fmt.format(kids.reduce((t, x) => t + amt(x), 0))}</div></div>`);
+        if (open) kids.forEach(x => rows.push(itemRow(x, true)));
+      });
+      return `<section class="group"><div class="group-head"><h2><i class="dot" style="background:${s.color}"></i>${s.name}</h2>
+        <span class="num">${fmt.format(totals[s.id])}</span></div>${rows.join("")}</section>`;
+    };
+
+    $b.innerHTML = `
+      <div class="seg view-seg" role="group" aria-label="Whose budget">
+        ${VIEWS.map(([k, n]) => `<button data-bview="${k}" aria-pressed="${view === k}">${n}</button>`).join("")}
+      </div>
+      <section class="hero">
+        <p class="hero-label">${label} monthly take-home</p>
+        <p class="hero-total num">${fmt0.format(inc)}</p>
+        <p class="hero-change">Budgeted <span class="num">${fmt.format(budgeted)}</span>. ${remainHtml}</p>
+        <p class="hero-equity">Savings rate <b class="num">${(rate * 100).toFixed(1)}%</b></p>
+      </section>
+      <div style="height:14px"></div>
+      ${allocHtml}${payHtml}${jointHtml}
+      ${SECTIONS.map(sectionHtml).join("")}
+      ${idle.length ? `<details class="history"><summary>Not budgeted (${idle.length})</summary>${idle.map(i => itemRow(i)).join("")}</details>` : ""}
+      <div class="footer">
+        <button class="secondary" id="bAdd">Add item</button>
+        <button class="secondary" id="bIncome">Income</button>
+      </div>`;
+
+    $b.querySelectorAll("[data-bview]").forEach(btn => btn.onclick = () => { view = btn.dataset.bview; render(); });
+    $b.querySelectorAll("[data-group]").forEach(r => {
+      const t = () => { const g = r.dataset.group; openGroups.has(g) ? openGroups.delete(g) : openGroups.add(g); render(); };
+      r.onclick = t; r.onkeydown = e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); t(); } };
+    });
+    $b.querySelectorAll("[data-edit]").forEach(r => {
+      const t = () => openItem(r.dataset.edit);
+      r.onclick = t; r.onkeydown = e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); t(); } };
+    });
+    document.getElementById("bAdd").onclick = () => openItem(null);
+    document.getElementById("bIncome").onclick = openIncome;
+  }
+
+  function renderEmpty() {
+    $b.innerHTML = `<section class="notice"><h2>Set up your budget</h2>
+      <p>Pick your budget.csv and budget-settings.csv together, or start from scratch.</p>
+      <input type="file" id="bImport" accept=".csv,text/csv" multiple hidden>
+      <button class="primary" id="bImportBtn">Import CSV files</button>
+      <button class="text-btn" id="bScratch">Start from scratch</button></section>`;
+    const inp = document.getElementById("bImport");
+    document.getElementById("bImportBtn").onclick = () => inp.click();
+    inp.onchange = async () => {
+      const files = [...inp.files];
+      const it = files.find(f => /budget(?!-settings)/i.test(f.name) && !/settings/i.test(f.name));
+      const st = files.find(f => /settings/i.test(f.name));
+      if (!it) { api().toast("Select budget.csv (and budget-settings.csv)"); return; }
+      const d = fromCSV(await it.text(), st ? await st.text() : "");
+      if (!d.list.length) { api().toast("Couldn’t read any budget items"); return; }
+      items = d.list; settings = d.set;
+      render();
+      await save();
+    };
+    document.getElementById("bScratch").onclick = openIncome;
+  }
+
+  // ---------- editing ----------
+  const field = (id, label, value, mode) => `<div class="field"><label for="${id}">${label}</label>
+    <input id="${id}" value="${value}" ${mode ? `inputmode="${mode}"` : ""} autocomplete="off"></div>`;
+
+  function openItem(id) {
+    const a = api(), esc = a.esc;
+    const it = id ? items.find(i => i.id === id) : { name: "", section: "necessity", group: "", kyle_p1: 0, kyle_p2: 0, victoria: 0, joint: false, method: "", note: "" };
+    let joint = it.joint;
+    const groups = [...new Set(items.map(i => i.group).filter(Boolean))];
+    const money = v => (v ? v.toFixed(2) : "");
+    a.openSheet(`
+      <div class="sheet-top"><h2>${id ? "Edit item" : "New item"}</h2><button class="text-btn" id="bx">Cancel</button></div>
+      ${field("bn", "Name", esc(it.name))}
+      <div class="field"><label for="bs">Section</label><select id="bs" class="select">
+        ${SECTIONS.map(s => `<option value="${s.id}" ${s.id === it.section ? "selected" : ""}>${s.name}</option>`).join("")}</select></div>
+      <div class="field"><label for="bg">Group (optional, e.g. Streaming)</label>
+        <input id="bg" value="${esc(it.group)}" list="bgl" autocomplete="off"><datalist id="bgl">${groups.map(g => `<option value="${esc(g)}">`).join("")}</datalist></div>
+      ${field("bk1", "Kyle, paycheck 1 (1st–15th)", money(it.kyle_p1), "decimal")}
+      ${field("bk2", "Kyle, paycheck 2 (16th–31st)", money(it.kyle_p2), "decimal")}
+      ${field("bv", "Victoria", money(it.victoria), "decimal")}
+      <div class="toggle-row"><label>Paid from joint account</label>
+        <div class="seg" role="group" style="width:150px"><button data-j="1" aria-pressed="${joint}">Yes</button><button data-j="0" aria-pressed="${!joint}">No</button></div></div>
+      ${field("bm", "Paid with (optional)", esc(it.method))}
+      ${field("bo", "Note (optional)", esc(it.note))}
+      <button class="primary" id="bsave">${id ? "Save" : "Add item"}</button>
+      ${id ? `<button class="secondary danger" id="bdel" style="width:100%">Delete item</button>` : ""}`);
+    const $s = document.getElementById("sheet");
+    $s.querySelectorAll("[data-j]").forEach(b => b.onclick = () => {
+      joint = b.dataset.j === "1";
+      $s.querySelectorAll("[data-j]").forEach(x => x.setAttribute("aria-pressed", (x.dataset.j === "1") === joint));
+    });
+    document.getElementById("bx").onclick = a.closeSheet;
+    document.getElementById("bsave").onclick = async () => {
+      const name = document.getElementById("bn").value.trim();
+      if (!name) { a.toast("Give it a name"); return; }
+      const next = {
+        name, section: document.getElementById("bs").value, group: document.getElementById("bg").value.trim(),
+        kyle_p1: num(document.getElementById("bk1").value), kyle_p2: num(document.getElementById("bk2").value),
+        victoria: num(document.getElementById("bv").value), joint,
+        method: document.getElementById("bm").value.trim(), note: document.getElementById("bo").value.trim(),
+      };
+      if (id) Object.assign(it, next); else items.push({ id: newId(), ...next });
+      a.closeSheet(); render(); await save();
+    };
+    const del = document.getElementById("bdel");
+    if (del) del.onclick = async () => {
+      if (!confirm(`Delete ${it.name}?`)) return;
+      items = items.filter(i => i.id !== id);
+      a.closeSheet(); render(); await save();
+    };
+  }
+
+  function openIncome() {
+    const a = api();
+    a.openSheet(`
+      <div class="sheet-top"><h2>Income</h2><button class="text-btn" id="ix">Cancel</button></div>
+      <p class="step-kind">Monthly take-home after taxes and benefits. Budget percentages use these.</p>
+      ${field("ikn", "Kyle, net monthly", settings.kyle_net ? settings.kyle_net.toFixed(2) : "", "decimal")}
+      ${field("ivn", "Victoria, net monthly", settings.victoria_net ? settings.victoria_net.toFixed(2) : "", "decimal")}
+      ${field("ikg", "Kyle, gross annual", settings.kyle_gross ? String(settings.kyle_gross) : "", "decimal")}
+      ${field("ivg", "Victoria, gross annual", settings.victoria_gross ? String(settings.victoria_gross) : "", "decimal")}
+      <button class="primary" id="isave">Save</button>`);
+    document.getElementById("ix").onclick = a.closeSheet;
+    document.getElementById("isave").onclick = async () => {
+      settings.kyle_net = num(document.getElementById("ikn").value);
+      settings.victoria_net = num(document.getElementById("ivn").value);
+      settings.kyle_gross = num(document.getElementById("ikg").value);
+      settings.victoria_gross = num(document.getElementById("ivg").value);
+      loaded = true;
+      a.closeSheet(); render(); await save();
+    };
+  }
 })();
 </script>
 </body>
