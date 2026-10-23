@@ -244,6 +244,8 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
 (() => {
   // ---------- state ----------
   let msal = null, account = null, etags = { accounts: null, balances: null };
+  let saving = false;
+  window.addEventListener("beforeunload", e => { if (saving) { e.preventDefault(); e.returnValue = ""; } });
   let state = { accounts: [], snapshots: [] };
   let loaded = false;
   let range = "12M";
@@ -395,12 +397,17 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
 
   function persist() {
     const body = clone(state);
+    saving = true;
     writeChain = writeChain.then(async () => {
       const { accText, balText } = toFiles(body);
-      etags.accounts = await writeFile("accounts.csv", accText, etags.accounts);
+      // Balances first: if a save gets cut off, you never end up with accounts but no history
       etags.balances = await writeFile("balances.csv", balText, etags.balances);
+      etags.accounts = await writeFile("accounts.csv", accText, etags.accounts);
       try { localStorage.setItem(CACHE_KEY, JSON.stringify(body)); } catch (e) {}
+      saving = false;
+      toast("Saved to OneDrive");
     }).catch(e => {
+      saving = false;
       if (e.message === "redirecting") return;
       if (e.code === "conflict") {
         toast("The file changed somewhere else. Reloading the latest version.");
@@ -687,8 +694,8 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
       state = fromFiles(await acc.text(), await bal.text());
       if (!state.accounts.length) { toast("Couldn’t read any accounts from that file"); return; }
       render();
+      toast(`Imported ${state.snapshots.length} entries. Saving… keep the app open`);
       await persist();
-      toast(`Imported ${state.snapshots.length} entries`);
     };
   }
 
@@ -857,9 +864,26 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
       <div class="sheet-top"><h2>Accounts</h2><button class="text-btn" id="x">Done</button></div>
       ${active.map(row).join("") || `<p class="step-kind">No active accounts.</p>`}
       ${archived.length ? `<p class="archived-title">Closed accounts</p>${archived.map(row).join("")}` : ""}
-      <button class="primary" id="add">Add account</button>`);
+      <button class="primary" id="add">Add account</button>
+      <input type="file" id="reImport" accept=".csv,text/csv" multiple hidden>
+      <button class="secondary" id="reImportBtn" style="width:100%">Replace everything from CSV files</button>`);
     document.getElementById("x").onclick = closeSheet;
     document.getElementById("add").onclick = () => openAccountEditor(null);
+    const ri = document.getElementById("reImport");
+    document.getElementById("reImportBtn").onclick = () => ri.click();
+    ri.onchange = async () => {
+      const files = [...ri.files];
+      const acc = files.find(f => /account/i.test(f.name)), bal = files.find(f => /balance/i.test(f.name));
+      if (!acc || !bal) { toast("Select both accounts.csv and balances.csv"); return; }
+      const next = fromFiles(await acc.text(), await bal.text());
+      if (!next.accounts.length) { toast("Couldn’t read any accounts from that file"); return; }
+      if (!confirm(`Replace all data with ${next.accounts.length} accounts and ${next.snapshots.length} entries from these files?`)) return;
+      state = next;
+      closeSheet();
+      render();
+      toast("Saving to OneDrive… keep the app open");
+      await persist();
+    };
     $sheet.querySelectorAll("[data-edit]").forEach(b => b.onclick = () => openAccountEditor(b.dataset.edit));
   }
 
@@ -966,6 +990,16 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
       const [acc, bal] = await Promise.all([readFile("accounts.csv"), readFile("balances.csv")]);
       etags = { accounts: acc.etag, balances: bal.etag };
       state = fromFiles(acc.text, bal.text);
+      const cached = (() => { try { return JSON.parse(localStorage.getItem(CACHE_KEY)); } catch (x) { return null; } })();
+      if (state.accounts.length && !state.snapshots.length && cached && cached.snapshots && cached.snapshots.length) {
+        // History missing in OneDrive (e.g. an interrupted save) but this phone has it: put it back
+        state = cached;
+        loaded = true;
+        render();
+        toast("Restoring your history to OneDrive…");
+        persist();
+        return;
+      }
       try { localStorage.setItem(CACHE_KEY, JSON.stringify(state)); } catch (e) {}
       loaded = true;
       if (!$overlay.classList.contains("open")) render();
