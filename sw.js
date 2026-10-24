@@ -1,5 +1,5 @@
 // Caches the app shell so it opens offline. Your data is never cached here.
-const CACHE = "networth-v8";
+const CACHE = "networth-v15";
 const SHELL = ["./", "index.html", "manifest.webmanifest", "icon-180.png", "icon-192.png",
   "msal-browser.min.js"];
 
