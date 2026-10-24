@@ -112,6 +112,27 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
 .b-sub { font-size: 12px; color: var(--muted); font-weight: 500; margin-top: 1px; }
 .b-note { font-size: 12px; color: var(--down); font-weight: 600; margin-top: 1px; }
 .b-amt { font-weight: 700; flex-shrink: 0; text-align: right; }
+.b-row.open .b-name { color: var(--accent); }
+.b-detail { padding: 0 0 12px; animation: grow .18s ease-out; }
+.b-detail.child { padding-left: 14px; }
+.b-detail .b-sub, .b-detail .b-note { margin: 0 0 8px; font-size: 13px; }
+.b-quick { display: flex; gap: 8px; }
+.b-q { flex: 1; min-width: 0; background: var(--surface-2); border-radius: 12px; padding: 6px 10px; }
+.b-q span { display: block; font-size: 11px; color: var(--muted); font-weight: 700; }
+.b-q input { width: 100%; border: 0; background: transparent; color: var(--text); font: inherit; font-size: 17px; font-weight: 800; padding: 2px 0; font-variant-numeric: tabular-nums; }
+.b-q input:focus { outline: none; }
+.b-q:focus-within { outline: 2px solid var(--accent); }
+.b-actions { display: flex; gap: 8px; margin-top: 8px; }
+.b-actions button { flex: 1; border: 0; border-radius: 12px; padding: 10px; font-weight: 800; font-size: 14px; }
+.b-save { background: var(--btn); color: var(--btn-text); }
+.sub-head { margin: 4px 0 6px; font-size: 13px; color: var(--muted); font-weight: 700; }
+.sub-list { background: var(--surface-2); border-radius: 14px; padding: 0 12px; }
+.sub-row { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 9px 0; border-top: 1px solid var(--line); cursor: pointer; font-size: 15px; }
+.sub-row:first-child { border-top: 0; }
+.sub-row .b-name { font-weight: 600; }
+.sub-row .b-amt { font-weight: 700; }
+.sub-add { margin-top: 4px; font-size: 15px; }
+.b-more { background: var(--surface-2); color: var(--muted); }
 .b-caret { color: var(--muted); font-size: 12px; margin-left: 6px; }
 .pay-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .pay-grid div { background: var(--surface-2); border-radius: 12px; padding: 10px 12px; }
@@ -1082,9 +1103,24 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
     { id: "savings", name: "Savings", color: "#30D158" },
   ];
   const VIEWS = [["household", "Household"], ["kyle", "Kyle"], ["victoria", "Victoria"]];
-  let items = [], settings = { kyle_gross: 0, victoria_gross: 0, kyle_net: 0, victoria_net: 0 };
-  let etag = { items: null, settings: null }, loaded = false, loading = false, ready = false;
-  let view = "household", openGroups = new Set(), chain = Promise.resolve();
+  const DEFAULT_SETTINGS = { kyle_gross: 0, victoria_gross: 0, kyle_net: 0, victoria_net: 0, kyle_own_insurance: 50, paychecks_per_month: 2 };
+  let items = [], settings = { ...DEFAULT_SETTINGS };
+  let funds = [], pets = [], gifts = [];
+  let etag = { items: null, settings: null, funds: null, pets: null, gifts: null }, loaded = false, loading = false, ready = false;
+  const round2 = n => Math.round(n * 100) / 100;
+  const fundMonthly = f => (f.years > 0 ? f.amount / (f.years * 12) : 0);
+  const petMonthly = x => (x.months > 0 ? x.cost / x.months : 0);
+  const giftYear = g => g.christmas + g.birthday + g.special;
+  // Shared costs split by take-home pay. Kyle's own health insurance is added back,
+  // so he's only credited for covering Victoria, not himself.
+  const kyleBasis = () => settings.kyle_net + settings.kyle_own_insurance * settings.paychecks_per_month;
+  const share = () => { const k = kyleBasis(), t = k + settings.victoria_net; return t > 0 ? k / t : 0.5; };
+  const pct = x => (x * 100).toFixed(1) + "%";
+  const SPLIT_BY_INCOME = ["mortgage/rent", "property taxes", "homeowners insurance", "hoa", "utilities (gas, electric, water)", "verizon fios"];
+  const autoSplit = name => (SPLIT_BY_INCOME.includes(String(name).trim().toLowerCase()) ? "income" : "fixed");
+  // Budget lines that add up from a detailed list
+  const autoSource = name => ({ "deferred savings": "deferred", "joint deferred": "deferred-joint", "pets": "pets", "gift savings": "gifts" })[String(name).trim().toLowerCase()] || "";
+  let view = "household", openGroups = new Set(), openId = null, chain = Promise.resolve();
   const api = () => window.NW;
   const fmt = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const fmt0 = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
@@ -1112,8 +1148,10 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
       id: r.id, name: r.name, section: SECTIONS.some(s => s.id === r.section) ? r.section : "necessity",
       group: r.group || "", kyle_p1: num(r.kyle_p1), kyle_p2: num(r.kyle_p2), victoria: num(r.victoria),
       joint: /^(true|yes|1)$/i.test(r.joint || ""), method: r.method || "", note: r.note || "",
+      source: r.source || autoSource(r.name),
+      split: r.split === "income" || r.split === "fixed" ? r.split : autoSplit(r.name),
     })).filter(i => i.id && i.name) : [];
-    const set = { kyle_gross: 0, victoria_gross: 0, kyle_net: 0, victoria_net: 0 };
+    const set = { ...DEFAULT_SETTINGS };
     if (settingsText) a.parseCSV(settingsText).forEach(r => { if (r.key) set[r.key] = num(r.value); });
     return { list, set };
   }
@@ -1123,10 +1161,12 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
     $b.innerHTML = `<p class="loading">Loading…</p>`;
     try {
       const a = api();
-      const [it, st] = await Promise.all([a.readFile("budget.csv"), a.readFile("budget-settings.csv")]);
-      etag = { items: it.etag, settings: st.etag };
+      const [it, st, fu, pe, gi] = await Promise.all(["budget.csv", "budget-settings.csv", "funds.csv", "pets.csv", "gifts.csv"].map(n => a.readFile(n)));
+      etag = { items: it.etag, settings: st.etag, funds: fu.etag, pets: pe.etag, gifts: gi.etag };
       const d = fromCSV(it.text, st.text);
       items = d.list; settings = d.set;
+      parseDetail(fu.text, pe.text, gi.text);
+      derive();
       loaded = true;
       render();
     } catch (e) {
@@ -1135,13 +1175,68 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
     } finally { loading = false; }
   }
 
-  function save() {
+  function parseDetail(fuText, peText, giText) {
     const a = api();
-    const itemsCSV = a.toCSV(["id", "name", "section", "group", "kyle_p1", "kyle_p2", "victoria", "joint", "method", "note"],
-      items.map(i => [i.id, i.name, i.section, i.group, i.kyle_p1.toFixed(2), i.kyle_p2.toFixed(2), i.victoria.toFixed(2), i.joint ? "true" : "false", i.method, i.note]));
+    funds = fuText ? a.parseCSV(fuText).map(r => ({ id: r.id, name: r.name, category: r.category || "",
+      person: ["kyle", "victoria", "joint"].includes(r.person) ? r.person : "joint", started: r.started || "",
+      amount: num(r.amount), years: parseFloat(r.years) || 0 })).filter(x => x.id && x.name) : [];
+    pets = peText ? a.parseCSV(peText).map(r => ({ id: r.id, product: r.product, pet: r.pet || "", category: r.category || "",
+      months: parseFloat(r.months) || 0, cost: num(r.cost) })).filter(x => x.id && x.product) : [];
+    gifts = giText ? a.parseCSV(giText).map(r => ({ id: r.id, name: r.name, christmas: num(r.christmas), birthday: num(r.birthday),
+      birthday_date: r.birthday_date || "", special: num(r.special), special_date: r.special_date || "" })).filter(x => x.id && x.name) : [];
+  }
+
+  const DETAIL_FILES = {
+    funds: () => api().toCSV(["id", "name", "category", "person", "started", "amount", "years"],
+      funds.map(f => [f.id, f.name, f.category, f.person, f.started, f.amount.toFixed(2), String(f.years)])),
+    pets: () => api().toCSV(["id", "product", "pet", "category", "months", "cost"],
+      pets.map(x => [x.id, x.product, x.pet, x.category, String(x.months), x.cost.toFixed(2)])),
+    gifts: () => api().toCSV(["id", "name", "christmas", "birthday", "birthday_date", "special", "special_date"],
+      gifts.map(g => [g.id, g.name, g.christmas.toFixed(2), g.birthday.toFixed(2), g.birthday_date, g.special.toFixed(2), g.special_date])),
+  };
+
+  // Keep Kyle's paycheck 1 / 2 proportions when a total is recalculated
+  function setKyle(it, total) {
+    const sum = it.kyle_p1 + it.kyle_p2, r = sum ? it.kyle_p1 / sum : 0;
+    it.kyle_p1 = round2(total * r);
+    it.kyle_p2 = round2(total - it.kyle_p1);
+  }
+  function derive() {
+    const sum = (arr, fn) => arr.reduce((t, x) => t + fn(x), 0);
+    items.forEach(it => {
+      if (it.source === "deferred" && funds.length) {
+        setKyle(it, round2(sum(funds.filter(f => f.person === "kyle"), fundMonthly)));
+        it.victoria = round2(sum(funds.filter(f => f.person === "victoria"), fundMonthly));
+      } else if (it.source === "deferred-joint" && funds.length) {
+        const t = round2(sum(funds.filter(f => f.person === "joint"), fundMonthly)), k = round2(t * share());
+        setKyle(it, k); it.victoria = round2(t - k);
+      } else if (it.source === "pets" && pets.length) {
+        setKyle(it, round2(sum(pets, petMonthly)));
+      } else if (it.source === "gifts" && gifts.length) {
+        setKyle(it, round2(sum(gifts, giftYear) / 12));
+      } else if (it.split === "income" && !it.source) {
+        setTotal(it, round2(kyleAmt(it) + it.victoria));
+      }
+    });
+  }
+  function setTotal(it, total) {
+    const k = round2(total * share());
+    if (!(it.kyle_p1 + it.kyle_p2)) it.kyle_p1 = 1; // new item: default to paycheck 1
+    setKyle(it, k);
+    it.victoria = round2(total - k);
+  }
+  const hasDetail = it => (it.source === "deferred" || it.source === "deferred-joint") ? funds.length > 0
+    : it.source === "pets" ? pets.length > 0 : it.source === "gifts" ? gifts.length > 0 : false;
+
+  function save(extra = []) {
+    const a = api();
+    const itemsCSV = a.toCSV(["id", "name", "section", "group", "kyle_p1", "kyle_p2", "victoria", "joint", "method", "note", "source", "split"],
+      items.map(i => [i.id, i.name, i.section, i.group, i.kyle_p1.toFixed(2), i.kyle_p2.toFixed(2), i.victoria.toFixed(2), i.joint ? "true" : "false", i.method, i.note, i.source || "", i.split || "fixed"]));
     const setCSV = a.toCSV(["key", "value"], Object.entries(settings).map(([k, v]) => [k, String(v)]));
+    const extraCSV = extra.map(k => [k, DETAIL_FILES[k]()]);
     a.toast("Saving…");
     chain = chain.then(async () => {
+      for (const [k, text] of extraCSV) etag[k] = await a.writeFile(`${k}.csv`, text, etag[k]);
       etag.items = await a.writeFile("budget.csv", itemsCSV, etag.items);
       etag.settings = await a.writeFile("budget-settings.csv", setCSV, etag.settings);
       a.toast("Saved to OneDrive");
@@ -1159,16 +1254,84 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
     if (view === "household" && kyleAmt(i) && i.victoria) parts.push(`Kyle ${fmt.format(kyleAmt(i))}, Victoria ${fmt.format(i.victoria)}`);
     if (view === "kyle" && i.kyle_p1 && i.kyle_p2) parts.push(`Paycheck 1 ${fmt.format(i.kyle_p1)}, Paycheck 2 ${fmt.format(i.kyle_p2)}`);
     else if (view === "kyle" && (i.kyle_p1 || i.kyle_p2)) parts.push(i.kyle_p1 ? "Paycheck 1" : "Paycheck 2");
+    if (i.split === "income" && !i.source) parts.push(`Split by take-home pay, ${pct(share())} / ${pct(1 - share())}`);
+    if (i.source === "deferred-joint") parts.push(`Split by take-home pay, ${pct(share())} / ${pct(1 - share())}`);
     if (i.method) parts.push(i.method);
     if (i.joint) parts.push("Joint account");
     return parts.join(". ");
   }
 
+  // Collapsed: name + amount. Tapped: description plus quick amount edit.
   function itemRow(i, child) {
-    const esc = api().esc, sub = subLine(i);
-    return `<div class="b-row${child ? " child" : ""}" data-edit="${i.id}" role="button" tabindex="0">
-      <div class="b-name">${esc(i.name)}${sub ? `<div class="b-sub">${esc(sub)}</div>` : ""}${i.note ? `<div class="b-note">${esc(i.note)}</div>` : ""}</div>
+    const esc = api().esc, open = openId === i.id;
+    let html = `<div class="b-row${child ? " child" : ""}${open ? " open" : ""}" data-toggle="${i.id}" role="button" tabindex="0" aria-expanded="${open}">
+      <div class="b-name">${esc(i.name)}</div>
       <div class="b-amt num">${fmt.format(amt(i))}</div></div>`;
+    if (!open) return html;
+    const sub = subLine(i);
+    const money = v => (v ? v.toFixed(2) : "");
+    const f = (key, label, v) => `<label class="b-q"><span>${label}</span><input data-q="${key}" value="${money(v)}" inputmode="decimal" placeholder="0.00" autocomplete="off"></label>`;
+    let fields = view === "kyle" ? [f("kyle_p1", "Paycheck 1", i.kyle_p1), f("kyle_p2", "Paycheck 2", i.kyle_p2)]
+      : view === "victoria" ? [f("victoria", "Victoria", i.victoria)]
+      : [f("kyle_p1", "Kyle P1", i.kyle_p1), f("kyle_p2", "Kyle P2", i.kyle_p2), f("victoria", "Victoria", i.victoria)];
+    const linked = hasDetail(i);
+    if (!linked && i.split === "income") fields = [f("total", "Total (split automatically)", kyleAmt(i) + i.victoria)];
+    if (linked) {
+      // Amounts come from the list; only portions the list doesn't cover stay editable
+      const computedVictoria = i.source === "deferred" || i.source === "deferred-joint";
+      fields = (!computedVictoria && view !== "kyle") ? [f("victoria", "Victoria (not in list)", i.victoria)] : [];
+    }
+    html += `<div class="b-detail${child ? " child" : ""}" data-detail="${i.id}">
+      ${sub ? `<p class="b-sub">${esc(sub)}</p>` : ""}${i.note ? `<p class="b-note">${esc(i.note)}</p>` : ""}
+      ${linked ? breakdown(i) : ""}
+      ${fields.length ? `<div class="b-quick">${fields.join("")}</div>` : ""}
+      <div class="b-actions">${fields.length ? `<button class="b-save" data-qsave="${i.id}">Save</button>` : ""}<button class="b-more" data-more="${i.id}">More options</button></div>
+    </div>`;
+    return html;
+  }
+
+  function breakdown(it) {
+    const esc = api().esc;
+    let rows = [], head = "", addType = "", addLabel = "";
+    const line = (type, id, name, value, sub) => `<div class="sub-row" data-sub="${type}:${id}" role="button" tabindex="0">
+      <div class="b-name">${esc(name)}${sub ? `<div class="b-sub">${esc(sub)}</div>` : ""}</div><div class="b-amt num">${fmt.format(value)}</div></div>`;
+    if (it.source === "deferred" || it.source === "deferred-joint") {
+      const people = it.source === "deferred-joint" ? ["joint"] : view === "kyle" ? ["kyle"] : view === "victoria" ? ["victoria"] : ["kyle", "victoria"];
+      const k = it.source === "deferred-joint" ? (view === "kyle" ? share() : view === "victoria" ? 1 - share() : 1) : 1;
+      const list = funds.filter(f => people.includes(f.person)).map(f => ({ f, m: fundMonthly(f) * k })).sort((a, b) => b.m - a.m);
+      const target = list.reduce((t, x) => t + x.f.amount, 0);
+      head = `${list.length} funds saving toward ${fmt0.format(target)}${it.source === "deferred-joint" && view !== "household" ? `, your ${Math.round(k * 100)}% share` : ""}`;
+      rows = list.map(({ f, m }) => line("fund", f.id, f.name, m, people.length > 1 ? (f.person === "kyle" ? "Kyle" : "Victoria") : ""));
+      addType = "fund"; addLabel = "Add fund";
+    } else if (it.source === "pets") {
+      const list = [...pets].sort((a, b) => petMonthly(b) - petMonthly(a));
+      head = `${list.length} recurring pet costs`;
+      rows = list.map(x => line("pet", x.id, x.product, petMonthly(x), x.pet));
+      addType = "pet"; addLabel = "Add pet expense";
+    } else if (it.source === "gifts") {
+      const list = [...gifts].sort((a, b) => giftYear(b) - giftYear(a));
+      head = `${fmt.format(list.reduce((t, g) => t + giftYear(g), 0))} a year across ${list.length} people`;
+      rows = list.map(g => line("gift", g.id, g.name, giftYear(g) / 12, `${fmt0.format(giftYear(g))} a year`));
+      addType = "gift"; addLabel = "Add person";
+    }
+    return `<p class="sub-head">${esc(head)}</p><div class="sub-list">${rows.join("")}</div>
+      <button class="text-btn sub-add" data-add="${addType}">${addLabel}</button>`;
+  }
+
+  async function quickSave(id) {
+    const it = items.find(i => i.id === id);
+    const panel = $b.querySelector(`[data-detail="${id}"]`);
+    if (!it || !panel) return;
+    let changed = false;
+    panel.querySelectorAll("[data-q]").forEach(inp => {
+      const v = num(inp.value);
+      if (inp.dataset.q === "total") {
+        if (round2(kyleAmt(it) + it.victoria) !== v) { setTotal(it, v); changed = true; }
+      } else if (it[inp.dataset.q] !== v) { it[inp.dataset.q] = v; changed = true; }
+    });
+    openId = null;
+    render();
+    if (changed) await save();
   }
 
   function render() {
@@ -1257,9 +1420,24 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
       const t = () => { const g = r.dataset.group; openGroups.has(g) ? openGroups.delete(g) : openGroups.add(g); render(); };
       r.onclick = t; r.onkeydown = e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); t(); } };
     });
-    $b.querySelectorAll("[data-edit]").forEach(r => {
-      const t = () => openItem(r.dataset.edit);
+    $b.querySelectorAll("[data-toggle]").forEach(r => {
+      const t = () => { openId = openId === r.dataset.toggle ? null : r.dataset.toggle; render(); };
       r.onclick = t; r.onkeydown = e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); t(); } };
+    });
+    $b.querySelectorAll("[data-qsave]").forEach(btn => btn.onclick = () => quickSave(btn.dataset.qsave));
+    $b.querySelectorAll("[data-sub]").forEach(r => {
+      const [type, id] = r.dataset.sub.split(":");
+      const t = () => (type === "fund" ? openFund(id) : type === "pet" ? openPet(id) : openGift(id));
+      r.onclick = t; r.onkeydown = e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); t(); } };
+    });
+    $b.querySelectorAll("[data-add]").forEach(btn => btn.onclick = () => {
+      const t = btn.dataset.add;
+      t === "fund" ? openFund(null) : t === "pet" ? openPet(null) : openGift(null);
+    });
+    $b.querySelectorAll("[data-more]").forEach(btn => btn.onclick = () => openItem(btn.dataset.more));
+    $b.querySelectorAll("[data-q]").forEach(inp => {
+      inp.onfocus = () => inp.select();
+      inp.onkeydown = e => { if (e.key === "Enter") { e.preventDefault(); quickSave(inp.closest("[data-detail]").dataset.detail); } };
     });
     document.getElementById("bAdd").onclick = () => openItem(null);
     document.getElementById("bIncome").onclick = openIncome;
@@ -1295,6 +1473,7 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
     const a = api(), esc = a.esc;
     const it = id ? items.find(i => i.id === id) : { name: "", section: "necessity", group: "", kyle_p1: 0, kyle_p2: 0, victoria: 0, joint: false, method: "", note: "" };
     let joint = it.joint;
+    let split = it.split || "fixed";
     const groups = [...new Set(items.map(i => i.group).filter(Boolean))];
     const money = v => (v ? v.toFixed(2) : "");
     a.openSheet(`
@@ -1304,9 +1483,16 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
         ${SECTIONS.map(s => `<option value="${s.id}" ${s.id === it.section ? "selected" : ""}>${s.name}</option>`).join("")}</select></div>
       <div class="field"><label for="bg">Group (optional, e.g. Streaming)</label>
         <input id="bg" value="${esc(it.group)}" list="bgl" autocomplete="off"><datalist id="bgl">${groups.map(g => `<option value="${esc(g)}">`).join("")}</datalist></div>
-      ${field("bk1", "Kyle, paycheck 1 (1st–15th)", money(it.kyle_p1), "decimal")}
-      ${field("bk2", "Kyle, paycheck 2 (16th–31st)", money(it.kyle_p2), "decimal")}
-      ${field("bv", "Victoria", money(it.victoria), "decimal")}
+      <div class="toggle-row"><label>How it’s split</label>
+        <div class="seg" role="group" style="width:200px"><button data-sp="income" aria-pressed="${split === "income"}">By income</button><button data-sp="fixed" aria-pressed="${split === "fixed"}">Fixed</button></div></div>
+      <div id="bIncomeFields" ${split === "income" ? "" : "hidden"}>
+        ${field("btot", `Monthly total (Kyle ${pct(share())}, Victoria ${pct(1 - share())})`, money(kyleAmt(it) + it.victoria), "decimal")}
+      </div>
+      <div id="bFixedFields" ${split === "fixed" ? "" : "hidden"}>
+        ${field("bk1", "Kyle, paycheck 1 (1st–15th)", money(it.kyle_p1), "decimal")}
+        ${field("bk2", "Kyle, paycheck 2 (16th–31st)", money(it.kyle_p2), "decimal")}
+        ${field("bv", "Victoria", money(it.victoria), "decimal")}
+      </div>
       <div class="toggle-row"><label>Paid from joint account</label>
         <div class="seg" role="group" style="width:150px"><button data-j="1" aria-pressed="${joint}">Yes</button><button data-j="0" aria-pressed="${!joint}">No</button></div></div>
       ${field("bm", "Paid with (optional)", esc(it.method))}
@@ -1318,6 +1504,12 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
       joint = b.dataset.j === "1";
       $s.querySelectorAll("[data-j]").forEach(x => x.setAttribute("aria-pressed", (x.dataset.j === "1") === joint));
     });
+    $s.querySelectorAll("[data-sp]").forEach(b => b.onclick = () => {
+      split = b.dataset.sp;
+      $s.querySelectorAll("[data-sp]").forEach(x => x.setAttribute("aria-pressed", x.dataset.sp === split));
+      document.getElementById("bIncomeFields").hidden = split !== "income";
+      document.getElementById("bFixedFields").hidden = split !== "fixed";
+    });
     document.getElementById("bx").onclick = a.closeSheet;
     document.getElementById("bsave").onclick = async () => {
       const name = document.getElementById("bn").value.trim();
@@ -1325,10 +1517,12 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
       const next = {
         name, section: document.getElementById("bs").value, group: document.getElementById("bg").value.trim(),
         kyle_p1: num(document.getElementById("bk1").value), kyle_p2: num(document.getElementById("bk2").value),
-        victoria: num(document.getElementById("bv").value), joint,
+        victoria: num(document.getElementById("bv").value), joint, split,
         method: document.getElementById("bm").value.trim(), note: document.getElementById("bo").value.trim(),
       };
-      if (id) Object.assign(it, next); else items.push({ id: newId(), ...next });
+      let target = it;
+      if (id) Object.assign(it, next); else { target = { id: newId(), source: "", ...next }; items.push(target); }
+      if (split === "income" && !target.source) setTotal(target, num(document.getElementById("btot").value));
       a.closeSheet(); render(); await save();
     };
     const del = document.getElementById("bdel");
@@ -1339,6 +1533,111 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
     };
   }
 
+  // ---------- detail editors ----------
+  const addMonths = (iso, months) => {
+    if (!iso) return null;
+    const [y, m, d] = iso.split("-").map(Number);
+    const dt = new Date(y, m - 1 + Math.round(months), d);
+    dt.setDate(dt.getDate() - 1);
+    return dt;
+  };
+  const longDate = dt => dt ? dt.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "";
+  function sheetShell(title, body, delId) {
+    return `<div class="sheet-top"><h2>${title}</h2><button class="text-btn" id="dx">Cancel</button></div>${body}
+      <p class="last-val" id="dlive"></p>
+      <button class="primary" id="dsave">Save</button>
+      ${delId ? `<button class="secondary danger" id="ddel" style="width:100%">Delete</button>` : ""}`;
+  }
+  function finishDetail(kind, onSave, onDelete, live) {
+    const a = api();
+    document.getElementById("dx").onclick = a.closeSheet;
+    if (live) {
+      const upd = () => { document.getElementById("dlive").textContent = live(); };
+      document.getElementById("sheet").querySelectorAll("input").forEach(i => i.addEventListener("input", upd));
+      upd();
+    }
+    document.getElementById("dsave").onclick = async () => {
+      if (onSave() === false) return;
+      derive(); a.closeSheet(); render(); await save([kind]);
+    };
+    const del = document.getElementById("ddel");
+    if (del) del.onclick = async () => {
+      if (!confirm("Delete this?")) return;
+      onDelete(); derive(); a.closeSheet(); render(); await save([kind]);
+    };
+  }
+  const val = id => document.getElementById(id).value;
+
+  function openFund(id) {
+    const a = api(), esc = a.esc;
+    const f = id ? funds.find(x => x.id === id) : { name: "", category: "", person: "joint", started: "", amount: 0, years: 1 };
+    let person = f.person;
+    const cats = [...new Set(funds.map(x => x.category).filter(Boolean))];
+    a.openSheet(sheetShell(id ? "Edit fund" : "New fund", `
+      ${field("fn", "What you’re saving for", esc(f.name))}
+      <div class="field"><label for="fc">Category</label><input id="fc" value="${esc(f.category)}" list="fcl" autocomplete="off">
+        <datalist id="fcl">${cats.map(c => `<option value="${esc(c)}">`).join("")}</datalist></div>
+      <div class="field"><label>Whose</label><div class="seg" role="group">
+        ${[["kyle", "Kyle"], ["victoria", "Victoria"], ["joint", "Joint"]].map(([k, n]) => `<button data-fp="${k}" aria-pressed="${person === k}">${n}</button>`).join("")}</div></div>
+      ${field("fa", "Amount needed", f.amount ? f.amount.toFixed(2) : "", "decimal")}
+      ${field("fy", "Every how many years", f.years ? String(f.years) : "", "decimal")}
+      <div class="field"><label for="fs">Started saving</label><input id="fs" type="date" value="${f.started}"></div>`, id));
+    const $s = document.getElementById("sheet");
+    $s.querySelectorAll("[data-fp]").forEach(b => b.onclick = () => {
+      person = b.dataset.fp;
+      $s.querySelectorAll("[data-fp]").forEach(x => x.setAttribute("aria-pressed", x.dataset.fp === person));
+    });
+    finishDetail("funds", () => {
+      const name = val("fn").trim(); if (!name) { a.toast("Give it a name"); return false; }
+      const next = { name, category: val("fc").trim(), person, amount: num(val("fa")), years: parseFloat(val("fy")) || 0, started: val("fs") };
+      if (id) Object.assign(f, next); else funds.push({ id: newId(), ...next });
+    }, () => { funds = funds.filter(x => x.id !== id); }, () => {
+      const amt = num(val("fa")), yrs = parseFloat(val("fy")) || 0;
+      const due = addMonths(val("fs"), yrs * 12);
+      return `${yrs ? fmt.format(amt / (yrs * 12)) : "$0.00"} a month${due ? `. Due ${longDate(due)}` : ""}`;
+    });
+  }
+
+  function openPet(id) {
+    const a = api(), esc = a.esc;
+    const x = id ? pets.find(p => p.id === id) : { product: "", pet: "", category: "", months: 1, cost: 0 };
+    a.openSheet(sheetShell(id ? "Edit pet expense" : "New pet expense", `
+      ${field("pp", "Product", esc(x.product))}
+      ${field("pw", "Pet", esc(x.pet))}
+      ${field("pc", "Category", esc(x.category))}
+      ${field("pk", "Cost each time", x.cost ? x.cost.toFixed(2) : "", "decimal")}
+      ${field("pm", "Lasts how many months", x.months ? String(x.months) : "", "decimal")}`, id));
+    finishDetail("pets", () => {
+      const product = val("pp").trim(); if (!product) { a.toast("Give it a name"); return false; }
+      const next = { product, pet: val("pw").trim(), category: val("pc").trim(), cost: num(val("pk")), months: parseFloat(val("pm")) || 0 };
+      if (id) Object.assign(x, next); else pets.push({ id: newId(), ...next });
+    }, () => { pets = pets.filter(p => p.id !== id); }, () => {
+      const m = parseFloat(val("pm")) || 0;
+      return `${m ? fmt.format(num(val("pk")) / m) : "$0.00"} a month`;
+    });
+  }
+
+  function openGift(id) {
+    const a = api(), esc = a.esc;
+    const g = id ? gifts.find(x => x.id === id) : { name: "", christmas: 0, birthday: 0, birthday_date: "", special: 0, special_date: "" };
+    const m = v => (v ? v.toFixed(2) : "");
+    a.openSheet(sheetShell(id ? "Edit gifts" : "New person", `
+      ${field("gn", "Name", esc(g.name))}
+      ${field("gc", "Christmas", m(g.christmas), "decimal")}
+      ${field("gb", "Birthday", m(g.birthday), "decimal")}
+      <div class="field"><label for="gbd">Birthday date</label><input id="gbd" type="date" value="${g.birthday_date}"></div>
+      ${field("gs", "Special occasion", m(g.special), "decimal")}
+      <div class="field"><label for="gsd">Special occasion date</label><input id="gsd" type="date" value="${g.special_date}"></div>`, id));
+    finishDetail("gifts", () => {
+      const name = val("gn").trim(); if (!name) { a.toast("Give it a name"); return false; }
+      const next = { name, christmas: num(val("gc")), birthday: num(val("gb")), birthday_date: val("gbd"), special: num(val("gs")), special_date: val("gsd") };
+      if (id) Object.assign(g, next); else gifts.push({ id: newId(), ...next });
+    }, () => { gifts = gifts.filter(x => x.id !== id); }, () => {
+      const y = num(val("gc")) + num(val("gb")) + num(val("gs"));
+      return `${fmt.format(y)} a year, ${fmt.format(y / 12)} a month`;
+    });
+  }
+
   function openIncome() {
     const a = api();
     a.openSheet(`
@@ -1346,16 +1645,27 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
       <p class="step-kind">Monthly take-home after taxes and benefits. Budget percentages use these.</p>
       ${field("ikn", "Kyle, net monthly", settings.kyle_net ? settings.kyle_net.toFixed(2) : "", "decimal")}
       ${field("ivn", "Victoria, net monthly", settings.victoria_net ? settings.victoria_net.toFixed(2) : "", "decimal")}
+      ${field("iki", "Kyle’s own health insurance, per paycheck", settings.kyle_own_insurance ? settings.kyle_own_insurance.toFixed(2) : "", "decimal")}
       ${field("ikg", "Kyle, gross annual", settings.kyle_gross ? String(settings.kyle_gross) : "", "decimal")}
       ${field("ivg", "Victoria, gross annual", settings.victoria_gross ? String(settings.victoria_gross) : "", "decimal")}
-      <button class="primary" id="isave">Save</button>`);
+      <p class="last-val" id="ishare"></p>
+      <button class="primary" id="isave">Save and recalculate splits</button>`);
+    const preview = () => {
+      const k = num(document.getElementById("ikn").value) + num(document.getElementById("iki").value) * settings.paychecks_per_month;
+      const t = k + num(document.getElementById("ivn").value);
+      document.getElementById("ishare").textContent = t ? `Shared costs split Kyle ${pct(k / t)}, Victoria ${pct(1 - k / t)}` : "";
+    };
+    document.getElementById("sheet").querySelectorAll("input").forEach(i => i.addEventListener("input", preview));
+    preview();
     document.getElementById("ix").onclick = a.closeSheet;
     document.getElementById("isave").onclick = async () => {
       settings.kyle_net = num(document.getElementById("ikn").value);
       settings.victoria_net = num(document.getElementById("ivn").value);
+      settings.kyle_own_insurance = num(document.getElementById("iki").value);
       settings.kyle_gross = num(document.getElementById("ikg").value);
       settings.victoria_gross = num(document.getElementById("ivg").value);
       loaded = true;
+      derive();
       a.closeSheet(); render(); await save();
     };
   }
