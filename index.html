@@ -145,6 +145,19 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
 .set-preview { font-weight: 800; font-size: 15px; margin: 2px 0 12px; }
 .set-preview span { color: var(--muted); font-weight: 600; }
 
+/* Sync status pill */
+.sync-pill {
+  position: fixed; left: 50%; transform: translateX(-50%); z-index: 14;
+  bottom: calc(84px + env(safe-area-inset-bottom, 0px));
+  font: inherit; font-size: 13px; font-weight: 700; color: var(--text);
+  padding: 7px 14px; border-radius: 999px; white-space: nowrap; max-width: 92vw; overflow: hidden; text-overflow: ellipsis;
+  background: var(--glass); border: 1px solid var(--glass-edge);
+  -webkit-backdrop-filter: blur(20px) saturate(180%); backdrop-filter: blur(20px) saturate(180%);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.2);
+}
+.sync-pill[hidden] { display: none; }
+.sync-pill.warn { color: var(--down); }
+
 /* Liquid Glass tab bar */
 :root { --glass: rgba(255, 255, 255, 0.55); --glass-edge: rgba(255, 255, 255, 0.75); --glass-active: rgba(18, 20, 26, 0.08); --glass-shine: rgba(255, 255, 255, 0.6); }
 @media (prefers-color-scheme: dark) {
@@ -341,7 +354,7 @@ details.history[open] summary::after { content: "Hide"; }
 .danger { color: var(--down); }
 .archived-title { color: var(--muted); font-size: 14px; font-weight: 700; margin: 18px 0 4px; }
 
-.toast { position: fixed; left: 50%; bottom: calc(92px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); background: var(--btn); color: var(--btn-text); padding: 10px 16px; border-radius: 12px; font-weight: 700; font-size: 14px; opacity: 0; pointer-events: none; transition: opacity .2s; z-index: 30; max-width: 90vw; text-align: center; }
+.toast { position: fixed; left: 50%; bottom: calc(128px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); background: var(--btn); color: var(--btn-text); padding: 10px 16px; border-radius: 12px; font-weight: 700; font-size: 14px; opacity: 0; pointer-events: none; transition: opacity .2s; z-index: 30; max-width: 90vw; text-align: center; }
 .toast.show { opacity: 1; }
 .loading { color: var(--muted); padding: 40px 0; text-align: center; }
 </style>
@@ -350,6 +363,7 @@ details.history[open] summary::after { content: "Hide"; }
 <main id="app"><p class="loading">Loading…</p></main>
 <main id="budgetApp" hidden><p class="loading">Loading…</p></main>
 <main id="settingsApp" hidden><p class="loading">Loading…</p></main>
+<button class="sync-pill" id="syncPill" hidden></button>
 <nav class="tabbar" aria-label="Sections">
   <button data-tab="nw" aria-pressed="true">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 17l5-5 4 3 8-8"/><path d="M15 7h5v5"/></svg>
@@ -377,9 +391,7 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
 // ============================================================================================
 (() => {
   // ---------- state ----------
-  let msal = null, account = null, etags = { accounts: null, balances: null };
-  let saving = false;
-  window.addEventListener("beforeunload", e => { if (saving) { e.preventDefault(); e.returnValue = ""; } });
+  let msal = null, account = null;
   let state = { accounts: [], snapshots: [] };
   let loaded = false;
   let range = WL_PREF.get("range", "12M");
@@ -434,43 +446,273 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
   }
 
   // ---------- persistence ----------
-  // ---------- OneDrive (Microsoft Graph) ----------
+  // ---------- OneDrive transport (Microsoft Graph) ----------
   const SCOPES = ["Files.ReadWrite.AppFolder"];
   const GRAPH = "https://graph.microsoft.com/v1.0/me/drive/special/approot:";
-  const CACHE_KEY = "nw-cache-v1";
+
+  class SyncError extends Error { constructor(kind, msg) { super(msg || kind); this.kind = kind; } }
+
+  async function gfetch(url, opts = {}, ms = 20000) {
+    const ctl = new AbortController();
+    const t = setTimeout(() => ctl.abort(), ms);
+    try { return await fetch(url, { ...opts, signal: ctl.signal, cache: "no-store" }); }
+    catch (e) { throw new SyncError("offline", "network"); }
+    finally { clearTimeout(t); }
+  }
 
   async function token() {
+    if (!msal || !account) throw new SyncError("auth", "not signed in");
+    if (!navigator.onLine) throw new SyncError("offline", "network");
     try {
       return (await msal.acquireTokenSilent({ scopes: SCOPES, account })).accessToken;
     } catch (e) {
-      await msal.acquireTokenRedirect({ scopes: SCOPES, account });
-      throw new Error("redirecting");
+      if (!navigator.onLine || /network_error|failed to fetch|networkerror|load failed/i.test(String((e && (e.errorCode || "")) + (e && e.message)))) throw new SyncError("offline", "network");
+      throw new SyncError("auth", String((e && e.errorCode) || "auth"));
     }
   }
 
-  async function readFile(name) {
+  async function graphMeta(name) {
     const t = await token();
-    const meta = await fetch(`${GRAPH}/${name}`, { headers: { Authorization: `Bearer ${t}` } });
-    if (meta.status === 404) return { text: null, etag: null };
-    if (!meta.ok) throw new Error(`read ${name}: ${meta.status}`);
-    const m = await meta.json();
-    const body = await fetch(m["@microsoft.graph.downloadUrl"]);
-    if (!body.ok) throw new Error(`download ${name}: ${body.status}`);
-    return { text: await body.text(), etag: m.eTag };
+    const res = await gfetch(`${GRAPH}/${name}`, { headers: { Authorization: `Bearer ${t}` } });
+    if (res.status === 404) return null;
+    if (res.status === 401) throw new SyncError("auth", "401");
+    if (!res.ok) throw new SyncError("error", `read ${name}: ${res.status}`);
+    const m = await res.json();
+    return { etag: m.eTag, url: m["@microsoft.graph.downloadUrl"] };
   }
-
-  async function writeFile(name, text, etag) {
+  async function graphDownload(meta, name) {
+    const res = await gfetch(meta.url);
+    if (!res.ok) throw new SyncError("error", `download ${name}: ${res.status}`);
+    return (await res.text()).replace(/^\uFEFF/, "");
+  }
+  async function graphPut(name, text, ifMatch) {
     const t = await token();
     const headers = { Authorization: `Bearer ${t}`, "Content-Type": "text/csv" };
-    if (etag) headers["If-Match"] = etag;
-    const res = await fetch(`${GRAPH}/${name}:/content`, { method: "PUT", headers, body: text });
-    if (res.status === 412) { const e = new Error("conflict"); e.code = "conflict"; throw e; }
-    if (!res.ok) throw new Error(`write ${name}: ${res.status}`);
+    if (ifMatch) headers["If-Match"] = ifMatch;
+    const res = await gfetch(`${GRAPH}/${name}:/content`, { method: "PUT", headers, body: text });
+    if (res.status === 412) throw new SyncError("conflict", "changed elsewhere");
+    if (res.status === 401) throw new SyncError("auth", "401");
+    if (!res.ok) throw new SyncError("error", `write ${name}: ${res.status}`);
     return (await res.json()).eTag;
   }
 
+  // ---------- Local-first store ----------
+  // Every file lives on this phone. The app reads and writes the local copy, and a
+  // sync step reconciles it with OneDrive whenever there's a connection.
+  const FILES = ["accounts.csv", "balances.csv", "budget.csv", "budget-settings.csv", "funds.csv", "pets.csv", "gifts.csv"];
+  const SYNC_ORDER = ["balances.csv", "accounts.csv", "funds.csv", "pets.csv", "gifts.csv", "budget.csv", "budget-settings.csv"];
+  const KEYFN = {
+    "accounts.csv": r => r.id, "balances.csv": r => r.date + "|" + r.account_id, "budget.csv": r => r.id,
+    "budget-settings.csv": r => r.key, "funds.csv": r => r.id, "pets.csv": r => r.id, "gifts.csv": r => r.id,
+  };
+  const mem = new Map();
+  let storageWarned = false;
+  const sk = (field, name) => `wl2:${field}:${name}`;
+  function lsGet(k) { if (mem.has(k)) return mem.get(k); try { return localStorage.getItem(k); } catch (e) { return null; } }
+  function lsSet(k, v) {
+    mem.set(k, v);
+    try { localStorage.setItem(k, v); }
+    catch (e) { if (!storageWarned) { storageWarned = true; toast("This phone has no storage left for the app. Changes may not survive closing it."); } }
+  }
+  function lsDel(k) { mem.delete(k); try { localStorage.removeItem(k); } catch (e) {} }
+  const isDirty = n => lsGet(sk("dirty", n)) === "1";
+  const dirtyFiles = () => FILES.filter(isDirty);
+  const autoSync = () => (window.WL_PREF ? window.WL_PREF.get("autosync", "auto") : "auto") === "auto";
+
+  function writeLocal(name, text) {
+    if (lsGet(sk("local", name)) === text) return;
+    lsSet(sk("local", name), text);
+    lsSet(sk("dirty", name), "1");
+  }
+  function writeFile(name, text) { writeLocal(name, text); return "local"; }
+
+  async function readFile(name) {
+    const local = lsGet(sk("local", name));
+    if (local != null) return { text: local, etag: "local" };
+    // First time on this device: fetch from OneDrive once, then it's local from here on.
+    const meta = await graphMeta(name);
+    if (!meta) return { text: null, etag: null };
+    const remote = await graphDownload(meta, name);
+    lsSet(sk("local", name), remote); lsSet(sk("base", name), remote);
+    lsSet(sk("etag", name), meta.etag); lsSet(sk("dirty", name), "0");
+    return { text: remote, etag: meta.etag };
+  }
+
+  // ---------- Merge (three-way, row by row) ----------
+  const rowCount = t => (t ? parseCSV(t).length : 0);
+  function mergeText(name, baseText, localText, remoteText) {
+    const keyOf = KEYFN[name];
+    const B = parseCSV(baseText || ""), L = parseCSV(localText || ""), R = parseCSV(remoteText || "");
+    const head = [];
+    [L.head, R.head, B.head].forEach(h => (h || []).forEach(c => { if (!head.includes(c)) head.push(c); }));
+    const norm = r => (r ? head.map(h => r[h] ?? "").join("\u0001") : undefined);
+    const idx = rows => { const m = new Map(); rows.forEach(r => { const k = keyOf(r); if (k) m.set(k, r); }); return m; };
+    const bm = idx(B), lm = idx(L), rm = idx(R);
+    const keys = [...new Set([...rm.keys(), ...lm.keys(), ...bm.keys()])];
+    const out = [];
+    for (const k of keys) {
+      const b = bm.get(k), l = lm.get(k), r = rm.get(k);
+      const nb = norm(b), nl = norm(l), nr = norm(r);
+      let pick;
+      if (nl === nr) pick = l;            // same on both sides
+      else if (nl === nb) pick = r;       // only OneDrive changed it
+      else if (nr === nb) pick = l;       // only this phone changed it
+      else pick = l;                      // both changed it: this phone wins
+      if (pick) out.push(pick);
+    }
+    if (name === "balances.csv") out.sort((x, y) => String(x.date).localeCompare(String(y.date)));
+    return toCSV(head, out.map(r => head.map(h => r[h] ?? "")));
+  }
+
+  // ---------- Sync engine ----------
+  const sync = { state: "idle", last: Number(lsGet("wl2:last") || 0), err: "", running: null, again: false, timer: null };
+  const syncListeners = new Set(), changeListeners = new Set();
+
+  function status() {
+    const d = dirtyFiles().length;
+    let state = sync.state;
+    if (state === "idle") state = d ? (navigator.onLine ? "pending" : "offline") : "synced";
+    return { state, dirty: d, last: sync.last, err: sync.err, auto: autoSync(), online: navigator.onLine };
+  }
+  function emit() { const st = status(); syncListeners.forEach(fn => { try { fn(st); } catch (e) {} }); }
+
+  async function syncFile(name, report) {
+    const snapshot = lsGet(sk("local", name));
+    const base = lsGet(sk("base", name));
+    const myEtag = lsGet(sk("etag", name));
+    const dirty = isDirty(name);
+    const meta = await graphMeta(name);
+
+    // Fully in sync only if nothing was edited while we were talking to OneDrive.
+    const finish = (text, etag) => {
+      const cur = lsGet(sk("local", name));
+      if (cur !== snapshot) return false;
+      lsSet(sk("base", name), text); lsSet(sk("etag", name), etag);
+      if (cur !== text) { lsSet(sk("local", name), text); report.changed.add(name); }
+      lsSet(sk("dirty", name), "0");
+      return true;
+    };
+    const guardEmpty = (text, reference) => {
+      if (rowCount(text) === 0 && rowCount(reference) >= 10)
+        throw new SyncError("error", "A copy looked empty, so nothing was uploaded. Settings → Reset this device’s copy fixes it.");
+    };
+
+    if (!meta) {                                   // not on OneDrive yet
+      if (snapshot == null) return;
+      guardEmpty(snapshot, base);
+      const etag = await graphPut(name, snapshot, null);
+      finish(snapshot, etag); report.pushed++;
+      return;
+    }
+    if (snapshot == null) {                        // nothing here yet: pull
+      const rt = await graphDownload(meta, name);
+      lsSet(sk("local", name), rt); lsSet(sk("base", name), rt); lsSet(sk("etag", name), meta.etag); lsSet(sk("dirty", name), "0");
+      report.pulled++; report.changed.add(name);
+      return;
+    }
+    const same = meta.etag === myEtag;
+    if (!dirty) {
+      if (same) return;
+      const rt = await graphDownload(meta, name);
+      if (lsGet(sk("local", name)) !== snapshot || isDirty(name)) return;   // edited meanwhile: next round
+      lsSet(sk("base", name), rt); lsSet(sk("etag", name), meta.etag);
+      if (rt !== snapshot) { lsSet(sk("local", name), rt); report.pulled++; report.changed.add(name); }
+      return;
+    }
+    if (same && snapshot === base) { lsSet(sk("dirty", name), "0"); return; }   // edit was undone
+    if (same) {                                    // OneDrive untouched since our last sync: just upload
+      guardEmpty(snapshot, base);
+      const etag = await graphPut(name, snapshot, meta.etag);
+      finish(snapshot, etag); report.pushed++;
+      return;
+    }
+    // Both sides changed: merge row by row
+    const rt = await graphDownload(meta, name);
+    if (rt === base) {                             // etag moved but content didn't
+      guardEmpty(snapshot, base);
+      const etag = await graphPut(name, snapshot, meta.etag);
+      finish(snapshot, etag); report.pushed++;
+      return;
+    }
+    const merged = mergeText(name, base, snapshot, rt);
+    guardEmpty(merged, rt);
+    if (merged === rt) { finish(rt, meta.etag); report.merged++; return; }
+    const etag = await graphPut(name, merged, meta.etag);
+    finish(merged, etag); report.pushed++; report.merged++;
+  }
+
+  async function syncFileRetry(name, report) {
+    for (let i = 0; ; i++) {
+      try { return await syncFile(name, report); }
+      catch (e) { if (e.kind === "conflict" && i < 2) continue; throw e; }
+    }
+  }
+
+  function runSync(reason) {
+    if (sync.running) { sync.again = true; return sync.running; }
+    sync.running = (async () => {
+      const report = { pushed: 0, pulled: 0, merged: 0, changed: new Set() };
+      try {
+        if (!msal || !account) throw new SyncError("auth", "not signed in");
+        if (!navigator.onLine) throw new SyncError("offline", "network");
+        sync.state = "syncing"; sync.err = ""; emit();
+        for (const name of SYNC_ORDER) await syncFileRetry(name, report);
+        sync.state = "idle"; sync.last = Date.now(); lsSet("wl2:last", String(sync.last));
+        if (report.changed.size) changeListeners.forEach(fn => { try { fn(report.changed); } catch (e) {} });
+        if (report.pushed) toast("Synced to OneDrive");
+        else if (report.changed.size) toast("Updated from OneDrive");
+        else if (reason === "manual") toast("Already up to date");
+      } catch (e) {
+        const kind = e.kind || "error";
+        sync.state = kind === "offline" ? "offline" : kind === "auth" ? "auth" : "error";
+        sync.err = kind === "error" ? e.message : "";
+        if (reason === "manual" && kind === "error") toast(e.message);
+      } finally {
+        sync.running = null;
+        emit();
+        if (sync.again) { sync.again = false; requestSync(300, true); }
+      }
+    })();
+    return sync.running;
+  }
+
+  function requestSync(delay = 1000, force = false) {
+    if (!autoSync() || !msal) { emit(); return; }
+    if (!force && !dirtyFiles().length && Date.now() - sync.last < 15000) return;
+    clearTimeout(sync.timer);
+    sync.timer = setTimeout(() => runSync("auto"), delay);
+  }
+
+  async function syncOrSignIn() {
+    if (!msal) return;
+    if (!account) { await msal.loginRedirect({ scopes: SCOPES }); return; }
+    if (sync.state === "auth") { await msal.acquireTokenRedirect({ scopes: SCOPES, account }); return; }
+    await runSync("manual");
+    if (sync.state === "auth") await msal.acquireTokenRedirect({ scopes: SCOPES, account });
+  }
+
+  // Apply changes that arrived from OneDrive once nothing is being edited
+  function whenSafe(fn) {
+    const busy = () => $overlay.classList.contains("open") || /^(INPUT|TEXTAREA|SELECT)$/.test((document.activeElement || {}).tagName || "");
+    const tick = () => (busy() ? setTimeout(tick, 2000) : fn());
+    tick();
+  }
+
+  function resetDevice() {
+    FILES.forEach(n => ["local", "base", "etag", "dirty"].forEach(f => lsDel(sk(f, n))));
+    lsDel("wl2:last");
+    location.reload();
+  }
+
+  window.NWSYNC = {
+    status, on: fn => { syncListeners.add(fn); return () => syncListeners.delete(fn); },
+    onChange: fn => changeListeners.add(fn), request: requestSync, run: runSync, emit, whenSafe,
+    syncOrSignIn, resetDevice, files: FILES,
+  };
+
   // ---------- CSV ----------
   function parseCSV(text) {
+    text = String(text || "").replace(/^\uFEFF/, "");
     const rows = []; let row = [], cur = "", q = false;
     for (let i = 0; i < text.length; i++) {
       const c = text[i];
@@ -489,9 +731,11 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
     }
     row.push(cur);
     if (row.some(v => v !== "")) rows.push(row);
-    if (!rows.length) return [];
+    if (!rows.length) { const e = []; e.head = []; return e; }
     const head = rows.shift().map(h => h.trim().toLowerCase());
-    return rows.map(r => Object.fromEntries(head.map((h, i) => [h, (r[i] || "").trim()])));
+    const out = rows.map(r => Object.fromEntries(head.map((h, i) => [h, (r[i] || "").trim()])));
+    out.head = head;
+    return out;
   }
   const cell = v => { const s = String(v ?? ""); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
   const toCSV = (head, rows) => [head.join(","), ...rows.map(r => r.map(cell).join(","))].join("\n") + "\n";
@@ -529,26 +773,18 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
     return { accText, balText };
   }
 
+  function afterLocalSave() {
+    const canSync = autoSync() && navigator.onLine && msal && account;
+    if (!canSync) toast("Saved on this phone");
+    emit();
+    requestSync(1000, true);
+  }
   function persist() {
-    const body = clone(state);
-    saving = true;
-    writeChain = writeChain.then(async () => {
-      const { accText, balText } = toFiles(body);
-      // Balances first: if a save gets cut off, you never end up with accounts but no history
-      etags.balances = await writeFile("balances.csv", balText, etags.balances);
-      etags.accounts = await writeFile("accounts.csv", accText, etags.accounts);
-      try { localStorage.setItem(CACHE_KEY, JSON.stringify(body)); } catch (e) {}
-      saving = false;
-      toast("Saved to OneDrive");
-    }).catch(e => {
-      saving = false;
-      if (e.message === "redirecting") return;
-      if (e.code === "conflict") {
-        toast("The file changed somewhere else. Reloading the latest version.");
-        loadFromOneDrive();
-      } else toast(navigator.onLine ? `Couldn’t save to OneDrive (${e.message}). Screenshot this.` : "You’re offline. Connect to save.");
-    });
-    return writeChain;
+    const { accText, balText } = toFiles(clone(state));
+    writeFile("balances.csv", balText);
+    writeFile("accounts.csv", accText);
+    afterLocalSave();
+    return Promise.resolve();
   }
 
   // ---------- derived data ----------
@@ -829,8 +1065,8 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
       state = fromFiles(await acc.text(), await bal.text());
       if (!state.accounts.length) { toast("Couldn’t read any accounts from that file"); return; }
       render();
-      toast(`Imported ${state.snapshots.length} entries. Saving… keep the app open`);
       await persist();
+      toast(`Imported ${state.snapshots.length} entries`);
     };
   }
 
@@ -1016,7 +1252,6 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
       state = next;
       closeSheet();
       render();
-      toast("Saving to OneDrive… keep the app open");
       await persist();
     };
     $sheet.querySelectorAll("[data-edit]").forEach(b => b.onclick = () => openAccountEditor(b.dataset.edit));
@@ -1122,44 +1357,55 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
   // Shared with the Budget tab
   window.NW = { readFile, writeFile, parseCSV, toCSV, toast, openSheet, closeSheet, esc,
     signOut: () => msal && msal.logoutRedirect({ account }),
+    afterSave: afterLocalSave,
     rerender: () => { if (loaded) render(); },
     setView: v => { view = v; openAcct = null; if (loaded) render(); },
     setRange: r => { range = r; acctRange = r; if (loaded) render(); } };
 
   // ---------- boot ----------
-  async function loadFromOneDrive() {
+  async function loadState() {
     try {
       const [acc, bal] = await Promise.all([readFile("accounts.csv"), readFile("balances.csv")]);
-      etags = { accounts: acc.etag, balances: bal.etag };
       state = fromFiles(acc.text, bal.text);
-      const cached = (() => { try { return JSON.parse(localStorage.getItem(CACHE_KEY)); } catch (x) { return null; } })();
-      if (state.accounts.length && !state.snapshots.length && cached && cached.snapshots && cached.snapshots.length) {
-        // History missing in OneDrive (e.g. an interrupted save) but this phone has it: put it back
-        state = cached;
-        loaded = true;
-        render();
-        toast("Restoring your history to OneDrive…");
-        persist();
-        return;
-      }
-      try { localStorage.setItem(CACHE_KEY, JSON.stringify(state)); } catch (e) {}
       loaded = true;
       if (!$overlay.classList.contains("open")) render();
+      window.__nwReady = true;   // flag as well as event: local loads finish before the Budget script attaches its listener
       window.dispatchEvent(new Event("nw-ready"));
     } catch (e) {
-      if (e.message === "redirecting") return;
-      const cached = (() => { try { return JSON.parse(localStorage.getItem(CACHE_KEY)); } catch (x) { return null; } })();
-      if (cached) {
-        state = cached; loaded = true; render();
-        toast("Showing your last saved copy. Saving needs a connection.");
-      } else {
-        $app.innerHTML = `<section class="notice"><h2>Couldn’t load your data</h2><p>Check your connection and reopen the app.</p></section>`;
+      if (e.kind === "auth") return renderSignIn("Sign in to load your data from OneDrive onto this phone.");
+      if (e.kind === "offline") {
+        $app.innerHTML = `<section class="notice"><h2>You’re offline</h2><p>Connect once to copy your data onto this phone. After that, the app works without a connection.</p></section>`;
+        return;
       }
+      $app.innerHTML = `<section class="notice"><h2>Couldn’t load your data</h2><p>${esc(e.message || "Check your connection and reopen the app.")}</p></section>`;
     }
   }
+  NWSYNC.onChange(names => {
+    if (names.has("accounts.csv") || names.has("balances.csv")) NWSYNC.whenSafe(loadState);
+  });
+
+  // Sync pill (only visible when there's something to say)
+  const pill = document.getElementById("syncPill");
+  let syncingTimer = null;
+  function paintPill(st) {
+    clearTimeout(syncingTimer);
+    const set = (txt, warn) => { pill.textContent = txt; pill.classList.toggle("warn", !!warn); pill.hidden = !txt; };
+    if (st.state === "syncing") { syncingTimer = setTimeout(() => { if (NWSYNC.status().state === "syncing") set("Syncing…"); }, 1200); return; }
+    if (st.state === "pending") set(st.auto ? "Changes waiting to sync" : "Changes waiting · tap to sync");
+    else if (st.state === "offline") set(st.dirty ? "Offline · changes saved on this phone" : "");
+    else if (st.state === "auth") set("Sign in to sync", true);
+    else if (st.state === "error") set("Sync problem · tap to retry", true);
+    else set("");
+  }
+  NWSYNC.on(paintPill);
+  pill.onclick = () => { if (NWSYNC.status().state !== "syncing") NWSYNC.syncOrSignIn(); };
+  window.addEventListener("online", () => { sync.state = "idle"; NWSYNC.emit(); requestSync(500, true); });
+  window.addEventListener("offline", () => NWSYNC.emit());
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) requestSync(500); });
 
   (async () => {
     if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
+    try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch (e) {}
     if (!window.msal || CLIENT_ID.startsWith("PASTE")) {
       $app.innerHTML = `<section class="notice"><h2>Almost set up</h2><p>Add your Microsoft app’s client ID at the top of index.html.</p></section>`;
       return;
@@ -1173,10 +1419,12 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
       const res = await msal.handleRedirectPromise();
       account = (res && res.account) || msal.getAllAccounts()[0] || null;
     } catch (e) {
-      return renderSignIn("Sign-in didn’t finish. Try again.");
+      account = msal.getAllAccounts()[0] || null;
+      if (!account && lsGet(sk("local", "accounts.csv")) == null) return renderSignIn("Sign-in didn’t finish. Try again.");
     }
-    if (!account) return renderSignIn();
-    loadFromOneDrive();
+    if (!account && lsGet(sk("local", "accounts.csv")) == null) return renderSignIn();
+    await loadState();
+    requestSync(300);
   })();
 })();
 </script>
@@ -1194,7 +1442,7 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
   const DEFAULT_SETTINGS = { kyle_gross: 0, victoria_gross: 0, kyle_net: 0, victoria_net: 0, kyle_own_insurance: 50, paychecks_per_month: 2 };
   let items = [], settings = { ...DEFAULT_SETTINGS };
   let funds = [], pets = [], gifts = [];
-  let etag = { items: null, settings: null, funds: null, pets: null, gifts: null }, loaded = false, loading = false, ready = false;
+  let etag = { items: null, settings: null, funds: null, pets: null, gifts: null }, loaded = false, loading = false, ready = !!window.__nwReady;
   const round2 = n => Math.round(n * 100) / 100;
   const fundMonthly = f => (f.years > 0 ? f.amount / (f.years * 12) : 0);
   const petMonthly = x => (x.months > 0 ? x.cost / x.months : 0);
@@ -1244,7 +1492,11 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
     shareFor: (kyleNet, ins, perMonth, vicNet) => { const k = kyleNet + ins * perMonth, t = k + vicNet; return t > 0 ? k / t : 0.5; },
     async update(patch) { Object.assign(settings, patch); loaded = true; derive(); render(); await save(); },
     setView(v) { view = v; if (loaded) render(); },
+    async reload() { if (!loaded) return; try { await pullFromStore(); render(); } catch (e) {} },
   };
+  window.NWSYNC.onChange(names => {
+    if (["budget.csv", "budget-settings.csv", "funds.csv", "pets.csv", "gifts.csv"].some(n => names.has(n))) window.NWSYNC.whenSafe(() => window.BUDGET.reload());
+  });
 
   // ---------- data ----------
   function fromCSV(itemsText, settingsText) {
@@ -1262,22 +1514,26 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
   }
 
   function load() { loadPromise = doLoad(); return loadPromise; }
+  async function pullFromStore() {
+    const a = api();
+    const [it, st, fu, pe, gi] = await Promise.all(["budget.csv", "budget-settings.csv", "funds.csv", "pets.csv", "gifts.csv"].map(n => a.readFile(n)));
+    const d = fromCSV(it.text, st.text);
+    items = d.list; settings = d.set;
+    parseDetail(fu.text, pe.text, gi.text);
+    derive();
+    loaded = true;
+  }
   async function doLoad() {
     loading = true;
     $b.innerHTML = `<p class="loading">Loading…</p>`;
     try {
-      const a = api();
-      const [it, st, fu, pe, gi] = await Promise.all(["budget.csv", "budget-settings.csv", "funds.csv", "pets.csv", "gifts.csv"].map(n => a.readFile(n)));
-      etag = { items: it.etag, settings: st.etag, funds: fu.etag, pets: pe.etag, gifts: gi.etag };
-      const d = fromCSV(it.text, st.text);
-      items = d.list; settings = d.set;
-      parseDetail(fu.text, pe.text, gi.text);
-      derive();
-      loaded = true;
+      await pullFromStore();
       render();
     } catch (e) {
-      if (e.message === "redirecting") return;
-      $b.innerHTML = `<section class="notice"><h2>Couldn’t load your budget</h2><p>Check your connection and reopen the app.</p></section>`;
+      const msg = e.kind === "offline" ? "You’re offline. Connect once to copy your budget onto this phone."
+        : e.kind === "auth" ? "Sign in (tap Sync in Settings) to load your budget onto this phone."
+        : "Check your connection and reopen the app.";
+      $b.innerHTML = `<section class="notice"><h2>Couldn’t load your budget</h2><p>${msg}</p></section>`;
     } finally { loading = false; }
   }
 
@@ -1339,19 +1595,11 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
     const itemsCSV = a.toCSV(["id", "name", "section", "group", "kyle_p1", "kyle_p2", "victoria", "joint", "method", "note", "source", "split"],
       items.map(i => [i.id, i.name, i.section, i.group, i.kyle_p1.toFixed(2), i.kyle_p2.toFixed(2), i.victoria.toFixed(2), i.joint ? "true" : "false", i.method, i.note, i.source || "", i.split || "fixed"]));
     const setCSV = a.toCSV(["key", "value"], Object.entries(settings).map(([k, v]) => [k, String(v)]));
-    const extraCSV = extra.map(k => [k, DETAIL_FILES[k]()]);
-    a.toast("Saving…");
-    chain = chain.then(async () => {
-      for (const [k, text] of extraCSV) etag[k] = await a.writeFile(`${k}.csv`, text, etag[k]);
-      etag.items = await a.writeFile("budget.csv", itemsCSV, etag.items);
-      etag.settings = await a.writeFile("budget-settings.csv", setCSV, etag.settings);
-      a.toast("Saved to OneDrive");
-    }).catch(e => {
-      if (e.message === "redirecting") return;
-      if (e.code === "conflict") { a.toast("The budget changed somewhere else. Reloading."); load(); }
-      else a.toast(`Couldn’t save the budget (${e.message})`);
-    });
-    return chain;
+    extra.forEach(k => a.writeFile(`${k}.csv`, DETAIL_FILES[k]()));
+    a.writeFile("budget.csv", itemsCSV);
+    a.writeFile("budget-settings.csv", setCSV);
+    a.afterSave();
+    return Promise.resolve();
   }
 
   // ---------- render ----------
@@ -1877,12 +2125,15 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
         <div class="set-row" style="margin-bottom:0"><span>Default chart range</span>${seg("range", P.get("range", "12M"), [["3M", "3M"], ["6M", "6M"], ["12M", "12M"], ["All", "All"]])}</div>
       </section>
       <section class="set-section">
-        <h2>Data</h2>
-        <p class="set-note">Your files live in OneDrive under Apps / NetWorth.</p>
+        <h2>Data and sync</h2>
+        <p class="set-note">Worthwhile keeps a full copy on this phone, so it works offline. Changes sync with OneDrive (Apps / NetWorth) when you’re connected.</p>
+        <p class="set-preview" id="sStatus"></p>
+        <div class="set-row"><span>Sync</span>${seg("autosync", P.get("autosync", "auto"), [["auto", "Automatic"], ["manual", "Manual only"]])}</div>
         <div class="footer">
-          <button class="secondary" id="sReload">Reload from OneDrive</button>
+          <button class="secondary" id="sSync">Sync now</button>
           <button class="secondary danger" id="sOut">Sign out</button>
         </div>
+        <button class="secondary danger" id="sReset" style="width:100%;margin-top:10px">Reset this device’s copy</button>
       </section>
       </div></div>`;
 
@@ -1922,11 +2173,34 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
       if (k === "nwView") window.NW.setView(v);
       if (k === "budgetView") window.BUDGET.setView(v);
       if (k === "range") window.NW.setRange(v);
+      if (k === "autosync") { v === "auto" ? window.NWSYNC.request(500, true) : window.NWSYNC.emit(); }
     });
-    document.getElementById("sReload").onclick = () => location.reload();
+    document.getElementById("sSync").onclick = () => window.NWSYNC.syncOrSignIn();
+    document.getElementById("sReset").onclick = () => {
+      const d = window.NWSYNC.status().dirty;
+      const warn = d ? `${d} file${d > 1 ? "s have" : " has"} changes that haven’t synced yet, and they’ll be lost. ` : "";
+      if (confirm(`${warn}Delete this phone’s copy and download everything fresh from OneDrive?`)) window.NWSYNC.resetDevice();
+    };
+    paintStatus(window.NWSYNC.status());
     document.getElementById("sOut").onclick = () => { if (confirm("Sign out of Microsoft on this device?")) window.NW.signOut(); };
   }
 
+  const ago = t => {
+    if (!t) return "Never synced on this device";
+    const m = Math.round((Date.now() - t) / 60000);
+    return m < 1 ? "Synced just now" : m < 60 ? `Synced ${m} min ago` : m < 1440 ? `Synced ${Math.round(m / 60)} hr ago` : `Synced ${new Date(t).toLocaleDateString("en-US", { month: "short", day: "numeric" })}`;
+  };
+  function paintStatus(st) {
+    const el = document.getElementById("sStatus");
+    if (!el) return;
+    const note = st.state === "pending" ? (st.auto ? "Changes waiting to sync." : "Changes waiting. Tap Sync now.")
+      : st.state === "offline" ? (st.dirty ? "Offline. Changes are saved on this phone." : "Offline.")
+      : st.state === "auth" ? "Signed out of Microsoft. Tap Sync now to sign in."
+      : st.state === "error" ? `Sync problem: ${st.err || "try again"}`
+      : st.state === "syncing" ? "Syncing…" : "Everything is up to date.";
+    el.innerHTML = `${ago(st.last)} <span>${note}</span>`;
+  }
+  window.NWSYNC.on(paintStatus);
   window.SETTINGS = { render };
 })();
 </script>
