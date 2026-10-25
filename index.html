@@ -158,6 +158,30 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
 .sync-pill[hidden] { display: none; }
 .sync-pill.warn { color: var(--down); }
 
+/* Compact summary that appears when the big one scrolls away */
+.mini {
+  position: fixed; left: 50%; top: calc(env(safe-area-inset-top, 0px) + 6px); z-index: 12;
+  width: min(calc(100% - 24px), 536px); transform: translate(-50%, -10px);
+  display: flex; align-items: center; justify-content: space-between; gap: 14px;
+  padding: 9px 14px; border-radius: 16px; cursor: pointer;
+  background: var(--glass); border: 1px solid var(--glass-edge);
+  -webkit-backdrop-filter: blur(20px) saturate(180%); backdrop-filter: blur(20px) saturate(180%);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.18);
+  opacity: 0; pointer-events: none; transition: opacity .18s, transform .18s;
+}
+.mini.show { opacity: 1; transform: translate(-50%, 0); pointer-events: auto; }
+@media (prefers-reduced-motion: reduce) { .mini { transition: none; } }
+.mini-main { display: flex; align-items: baseline; gap: 8px; min-width: 0; flex-shrink: 0; }
+.mini-label { color: var(--muted); font-size: 12px; font-weight: 700; white-space: nowrap; }
+.mini-num { font-size: 19px; font-weight: 800; white-space: nowrap; }
+.mini-side { font-size: 13px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.mini .up { color: var(--up); }
+.mini .down { color: var(--down); }
+
+/* Editable amounts in the budget list */
+.amt-edit { font: inherit; border: 0; background: var(--surface-2); color: var(--text); border-radius: 10px; padding: 4px 10px; cursor: text; -webkit-tap-highlight-color: transparent; }
+.amt-input { width: 112px; font: inherit; font-weight: 800; text-align: right; color: var(--text); background: var(--surface-2); border: 0; border-radius: 10px; padding: 4px 10px; outline: 2px solid var(--accent); flex-shrink: 0; font-variant-numeric: tabular-nums; }
+
 /* Liquid Glass tab bar */
 :root { --glass: rgba(255, 255, 255, 0.55); --glass-edge: rgba(255, 255, 255, 0.75); --glass-active: rgba(18, 20, 26, 0.08); --glass-shine: rgba(255, 255, 255, 0.6); }
 @media (prefers-color-scheme: dark) {
@@ -918,7 +942,11 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
       </details>` : "";
 
     const hist = [...s].reverse();
-    $app.innerHTML = `<div class="cols"><div class="col col-a">
+    const miniD = last && prev ? last.nw - prev.nw : null;
+    const miniHtml = `<div class="mini" role="button" aria-label="Back to top"><div class="mini-main"><span class="mini-label">${view === "household" ? "Net worth" : view === "kyle" ? "Kyle" : "Victoria"}</span>
+      <span class="mini-num num">${last ? fmt0.format(last.nw) : "$0"}</span></div>
+      <span class="mini-side num ${miniD !== null && miniD >= 0 ? "up" : "down"}">${miniD !== null ? signed(miniD) : ""}</span></div>`;
+    $app.innerHTML = `${miniHtml}<div class="cols"><div class="col col-a">
       <div class="seg view-seg" role="group" aria-label="Whose accounts">
         ${OWNERS.map(([k, n]) => `<button data-view="${k}" aria-pressed="${view === k}">${n}</button>`).join("")}
       </div>
@@ -947,6 +975,7 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
       </div></div></div>`;
 
     drawChart(s);
+    bindMini($app);
     $app.querySelectorAll("[data-view]").forEach(b => b.onclick = () => { view = b.dataset.view; openAcct = null; render(); });
     document.getElementById("updateBtn").onclick = openUpdate;
     document.getElementById("manageBtn").onclick = openManage;
@@ -1354,6 +1383,20 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
     }
   }
 
+  // Shows the compact summary bar once the big summary has scrolled off the top
+  const miniObservers = new WeakMap();
+  function bindMini(container) {
+    const prev = miniObservers.get(container);
+    if (prev) prev.disconnect();
+    const hero = container.querySelector(".hero"), mini = container.querySelector(".mini");
+    if (!hero || !mini || !("IntersectionObserver" in window)) return;
+    const io = new IntersectionObserver(([e]) => mini.classList.toggle("show", !e.isIntersecting && e.boundingClientRect.top < 0), { threshold: 0 });
+    io.observe(hero);
+    miniObservers.set(container, io);
+    mini.onclick = () => window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+  window.NWUI = { bindMini };
+
   // Shared with the Budget tab
   window.NW = { readFile, writeFile, parseCSV, toCSV, toast, openSheet, closeSheet, esc,
     signOut: () => msal && msal.logoutRedirect({ account }),
@@ -1616,11 +1659,16 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
   }
 
   // Collapsed: name + amount. Tapped: description plus quick amount edit.
+  // Lines built from a list can't be typed over (their total comes from the list), except Victoria's own gift amount
+  const canInline = i => !hasDetail(i) || (i.source === "gifts" && view === "victoria");
   function itemRow(i, child) {
     const esc = api().esc, open = openId === i.id;
+    const amtHtml = canInline(i)
+      ? `<button class="b-amt num amt-edit" data-amt="${i.id}" aria-label="Edit ${esc(i.name)} amount">${fmt.format(amt(i))}</button>`
+      : `<div class="b-amt num">${fmt.format(amt(i))}</div>`;
     let html = `<div class="b-row${child ? " child" : ""}${open ? " open" : ""}" data-toggle="${i.id}" role="button" tabindex="0" aria-expanded="${open}">
       <div class="b-name">${esc(i.name)}</div>
-      <div class="b-amt num">${fmt.format(amt(i))}</div></div>`;
+      ${amtHtml}</div>`;
     if (!open) return html;
     const sub = subLine(i);
     const money = v => (v ? v.toFixed(2) : "");
@@ -1678,8 +1726,12 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
 
   function childRow(type, row) {
     const esc = api().esc, o = row.obj, key = `${type}:${o.id}`, open = openId === key;
+    const editable = type === "fund" ? o.years > 0 : type === "pet" ? o.months > 0 : false;   // gifts are split across occasions, so no single number to type
+    const amtHtml = editable
+      ? `<button class="b-amt num amt-edit" data-camt="${key}" aria-label="Edit ${esc(row.name)} monthly amount">${fmt.format(row.m)}</button>`
+      : `<div class="b-amt num">${fmt.format(row.m)}</div>`;
     let html = `<div class="b-row child${open ? " open" : ""}" data-toggle="${key}" role="button" tabindex="0" aria-expanded="${open}">
-      <div class="b-name">${esc(row.name)}</div><div class="b-amt num">${fmt.format(row.m)}</div></div>`;
+      <div class="b-name">${esc(row.name)}</div>${amtHtml}</div>`;
     if (!open) return html;
     const money = v => (v ? v.toFixed(2) : "");
     const f = (k, label, v, isMoney = true) => `<label class="b-q"><span>${label}</span><input data-c="${k}" value="${isMoney ? money(v) : (v || "")}" inputmode="decimal" placeholder="0" autocomplete="off"></label>`;
@@ -1706,6 +1758,72 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
     openId = null;
     derive(); render();
     if (changed) await save([type === "fund" ? "funds" : type === "pet" ? "pets" : "gifts"]);
+  }
+
+  // Type a new amount right in the list. What the number means depends on the view you're in.
+  function applyInline(it, v) {
+    v = Math.max(0, round2(v));
+    if (hasDetail(it)) { if (it.source === "gifts" && view === "victoria") it.victoria = v; return; }
+    const noKyle = it.kyle_p1 + it.kyle_p2 === 0;
+    if (it.split === "income" && !it.source) {                 // shared bill: the shown number is a total or someone's share of it
+      const sh = share();
+      const edge = sh < 0.0001 || sh > 0.9999;
+      const total = edge || view === "household" ? v : view === "kyle" ? v / sh : v / (1 - sh);
+      setTotal(it, round2(total));
+      return;
+    }
+    if (view === "kyle") { if (noKyle) { it.kyle_p1 = v; it.kyle_p2 = 0; } else setKyle(it, v); }
+    else if (view === "victoria") it.victoria = v;
+    else {                                                      // household total: keep the existing Kyle/Victoria proportions
+      const cur = kyleAmt(it) + it.victoria;
+      if (cur === 0) { it.kyle_p1 = v; it.kyle_p2 = 0; it.victoria = 0; return; }
+      const k = round2(kyleAmt(it) * v / cur);
+      if (noKyle) { it.kyle_p1 = k; it.kyle_p2 = 0; } else setKyle(it, k);
+      it.victoria = round2(v - k);
+    }
+  }
+  function applyChildInline(key, v) {
+    const [type, id] = key.split(":");
+    v = Math.max(0, round2(v));
+    if (type === "fund") { const f = funds.find(x => x.id === id); if (f && f.years > 0) f.amount = round2(v * f.years * 12); }
+    else if (type === "pet") { const p = pets.find(x => x.id === id); if (p && p.months > 0) p.cost = round2(v * p.months); }
+    derive();
+  }
+  function startInline(btn, kind) {
+    const isItem = kind === "item", key = isItem ? btn.dataset.amt : btn.dataset.camt;
+    let current;
+    if (isItem) { const it = items.find(i => i.id === key); if (!it) return; current = amt(it); }
+    else {
+      const [type, id] = key.split(":");
+      const o = (type === "fund" ? funds : pets).find(x => x.id === id);
+      if (!o) return;
+      current = type === "fund" ? fundMonthly(o) : petMonthly(o);
+    }
+    const inp = document.createElement("input");
+    inp.className = "amt-input num";
+    inp.setAttribute("inputmode", "decimal");
+    inp.setAttribute("autocomplete", "off");
+    inp.setAttribute("aria-label", "New amount");
+    inp.value = current ? current.toFixed(2) : "";
+    btn.replaceWith(inp);
+    inp.focus(); inp.select();
+    let done = false;
+    const finish = async commit => {
+      if (done) return;
+      done = true;
+      const v = num(inp.value);
+      if (!commit || Math.abs(v - current) < 0.005) { render(); return; }
+      if (isItem) applyInline(items.find(i => i.id === key), v); else applyChildInline(key, v);
+      render();
+      await save(isItem ? [] : [key.startsWith("fund") ? "funds" : "pets"]);
+    };
+    inp.onblur = () => finish(true);
+    inp.onclick = e => e.stopPropagation();
+    inp.onkeydown = e => {
+      e.stopPropagation();
+      if (e.key === "Enter") { e.preventDefault(); inp.blur(); }
+      else if (e.key === "Escape") { e.preventDefault(); finish(false); }
+    };
   }
 
   async function quickSave(id) {
@@ -1798,7 +1916,9 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
         <span class="num">${fmt.format(totals[s.id])}</span></div>${rows.join("")}</section>`;
     };
 
-    $b.innerHTML = `<div class="cols"><div class="col col-a">
+    const miniB = `<div class="mini" role="button" aria-label="Back to top"><div class="mini-main"><span class="mini-label">Budgeted</span>
+      <span class="mini-num num">${fmt.format(budgeted)}</span></div><span class="mini-side num">${Math.abs(remaining) < 0.01 ? `<span class="b-pos">All assigned</span>` : remaining > 0 ? `<span class="b-pos">${fmt.format(remaining)} left</span>` : `<span class="b-neg">${fmt.format(-remaining)} over</span>`}</span></div>`;
+    $b.innerHTML = `${miniB}<div class="cols"><div class="col col-a">
       <div class="seg view-seg" role="group" aria-label="Whose budget">
         ${VIEWS.map(([k, n]) => `<button data-bview="${k}" aria-pressed="${view === k}">${n}</button>`).join("")}
       </div>
@@ -1848,6 +1968,9 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
     });
     document.getElementById("bAdd").onclick = () => openItem(null);
     document.getElementById("bIncome").onclick = openIncome;
+    $b.querySelectorAll("[data-amt]").forEach(btn => { btn.onclick = e => { e.stopPropagation(); startInline(btn, "item"); }; btn.onkeydown = e => e.stopPropagation(); });
+    $b.querySelectorAll("[data-camt]").forEach(btn => { btn.onclick = e => { e.stopPropagation(); startInline(btn, "child"); }; btn.onkeydown = e => e.stopPropagation(); });
+    window.NWUI.bindMini($b);
   }
 
   function renderEmpty() {
