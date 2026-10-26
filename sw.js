@@ -1,7 +1,7 @@
 // Caches the app shell so it opens offline. Your data is never cached here.
 // Network first (so updates show up right away), but if the network is slow or down,
 // the cached copy is used after 3.5 seconds.
-const CACHE = "networth-v17";
+const CACHE = "networth-v19";
 const SHELL = ["./", "index.html", "manifest.webmanifest", "icon-180.png", "icon-192.png", "msal-browser.min.js"];
 
 self.addEventListener("install", e => {

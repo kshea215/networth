@@ -161,7 +161,7 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
 /* Compact summary that appears when the big one scrolls away */
 .mini {
   position: fixed; left: 50%; top: calc(env(safe-area-inset-top, 0px) + 6px); z-index: 12;
-  width: min(calc(100% - 24px), 536px); transform: translate(-50%, -10px);
+  width: min(calc(100% - 36px), 524px); transform: translate(-50%, -10px);
   display: flex; align-items: center; justify-content: space-between; gap: 14px;
   padding: 9px 14px; border-radius: 16px; cursor: pointer;
   background: var(--glass); border: 1px solid var(--glass-edge);
@@ -179,8 +179,10 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
 .mini .down { color: var(--down); }
 
 /* Editable amounts in the budget list */
-.amt-edit { font: inherit; border: 0; background: var(--surface-2); color: var(--text); border-radius: 10px; padding: 4px 10px; cursor: text; -webkit-tap-highlight-color: transparent; }
-.amt-input { width: 112px; font: inherit; font-weight: 800; text-align: right; color: var(--text); background: var(--surface-2); border: 0; border-radius: 10px; padding: 4px 10px; outline: 2px solid var(--accent); flex-shrink: 0; font-variant-numeric: tabular-nums; }
+/* Every amount in the list gets the same width, height, and right edge, whether or not it's editable */
+.b-row .b-amt { box-sizing: border-box; min-width: 116px; padding: 4px 10px; margin-right: -10px; line-height: 1.3; font-size: 16px; text-align: right; }
+.amt-edit { font: inherit; font-size: 16px; font-weight: 700; border: 0; background: var(--surface-2); color: var(--text); border-radius: 10px; cursor: text; -webkit-tap-highlight-color: transparent; }
+.amt-input { box-sizing: border-box; width: 118px; font: inherit; font-size: 16px; font-weight: 800; line-height: 1.3; text-align: right; color: var(--text); background: var(--surface-2); border: 0; border-radius: 10px; padding: 4px 10px; margin-right: -10px; outline: 2px solid var(--accent); flex-shrink: 0; font-variant-numeric: tabular-nums; }
 
 /* Liquid Glass tab bar */
 :root { --glass: rgba(255, 255, 255, 0.55); --glass-edge: rgba(255, 255, 255, 0.75); --glass-active: rgba(18, 20, 26, 0.08); --glass-shine: rgba(255, 255, 255, 0.6); }
@@ -1535,7 +1537,7 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
     shareFor: (kyleNet, ins, perMonth, vicNet) => { const k = kyleNet + ins * perMonth, t = k + vicNet; return t > 0 ? k / t : 0.5; },
     async update(patch) { Object.assign(settings, patch); loaded = true; derive(); render(); await save(); },
     setView(v) { view = v; if (loaded) render(); },
-    async reload() { if (!loaded) return; try { await pullFromStore(); render(); } catch (e) {} },
+    async reload() { if (!loaded) return; try { await pullFromStore(); render(); saveIfMigrated(); } catch (e) {} },
   };
   window.NWSYNC.onChange(names => {
     if (["budget.csv", "budget-settings.csv", "funds.csv", "pets.csv", "gifts.csv"].some(n => names.has(n))) window.NWSYNC.whenSafe(() => window.BUDGET.reload());
@@ -1563,15 +1565,18 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
     const d = fromCSV(it.text, st.text);
     items = d.list; settings = d.set;
     parseDetail(fu.text, pe.text, gi.text);
+    if (migrateUtilities()) needsSave = true;
     derive();
     loaded = true;
   }
+  const saveIfMigrated = () => { if (needsSave) { needsSave = false; save(); } };
   async function doLoad() {
     loading = true;
     $b.innerHTML = `<p class="loading">Loading…</p>`;
     try {
       await pullFromStore();
       render();
+      saveIfMigrated();
     } catch (e) {
       const msg = e.kind === "offline" ? "You’re offline. Connect once to copy your budget onto this phone."
         : e.kind === "auth" ? "Sign in (tap Sync in Settings) to load your budget onto this phone."
@@ -1626,9 +1631,36 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
   }
   function setTotal(it, total) {
     const k = round2(total * share());
-    if (!(it.kyle_p1 + it.kyle_p2)) it.kyle_p1 = 1; // new item: default to paycheck 1
+    if (!(it.kyle_p1 + it.kyle_p2)) {
+      const sib = it.group ? items.find(x => x !== it && x.group === it.group && x.kyle_p1 + x.kyle_p2 > 0) : null;
+      if (sib) { const sm = sib.kyle_p1 + sib.kyle_p2; it.kyle_p1 = sib.kyle_p1 / sm; it.kyle_p2 = sib.kyle_p2 / sm; }   // same paycheck as the rest of its group
+      else it.kyle_p1 = 1;                                                                                              // otherwise paycheck 1
+    }
     setKyle(it, k);
     it.victoria = round2(total - k);
+  }
+
+  // Groups whose lines stay visible inside the dropdown even at $0, so you can type an amount into them
+  const KEEP_ZERO_GROUPS = new Set(["Utilities"]);
+  const keepZero = i => !!i.group && KEEP_ZERO_GROUPS.has(i.group);
+  let needsSave = false;
+
+  // One time: turn the single "Utilities (Gas, Electric, Water)" line into Electric, Gas, Water, and Trash
+  function migrateUtilities() {
+    const idx = items.findIndex(i => /^utilities\s*\(gas,\s*electric,?\s*(&|and)?\s*water\)$/i.test(String(i.name).trim()));
+    if (idx < 0 || items.some(i => i.group === "Utilities")) return false;
+    const old = items[idx];
+    const total = round2(kyleAmt(old) + old.victoria);
+    const third = round2(total / 3);
+    const sum = old.kyle_p1 + old.kyle_p2;
+    const fresh = [["Electric", third], ["Gas", third], ["Water", round2(total - third * 2)], ["Trash", 0]].map(([name, amount]) => {
+      const it = { id: newId(), name, section: old.section, group: "Utilities", kyle_p1: 0, kyle_p2: 0, victoria: 0,
+        joint: old.joint, method: old.method, note: "", source: "", split: "income" };
+      if (amount > 0) { it.kyle_p1 = sum ? old.kyle_p1 / sum : 0; it.kyle_p2 = sum ? old.kyle_p2 / sum : 0; setTotal(it, amount); }
+      return it;
+    });
+    items.splice(idx, 1, ...fresh);
+    return true;
   }
   const hasDetail = it => (it.source === "deferred" || it.source === "deferred-joint") ? funds.length > 0
     : it.source === "pets" ? pets.length > 0 : it.source === "gifts" ? gifts.length > 0 : false;
@@ -1848,8 +1880,8 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
     if (!items.length && !(settings.kyle_net || settings.victoria_net)) return renderEmpty();
 
     const inc = income();
-    const live = items.filter(i => amt(i) > 0.004);
-    const idle = items.filter(i => amt(i) <= 0.004);
+    const live = items.filter(i => amt(i) > 0.004 || keepZero(i));
+    const idle = items.filter(i => amt(i) <= 0.004 && !keepZero(i));
     const totals = Object.fromEntries(SECTIONS.map(s => [s.id, live.filter(i => i.section === s.id).reduce((t, i) => t + amt(i), 0)]));
     const budgeted = totals.necessity + totals.discretionary + totals.savings;
     const remaining = Math.round((inc - budgeted) * 100) / 100;
