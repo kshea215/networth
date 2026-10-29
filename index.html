@@ -256,6 +256,11 @@ main { padding-bottom: calc(96px + env(safe-area-inset-bottom, 0px)) !important;
 .pay-grid em.down, .b-neg { color: var(--down); }
 .card-title { margin: 0 0 10px; font-size: 13px; color: var(--muted); font-weight: 700; }
 .joint-line { display: flex; justify-content: space-between; font-weight: 700; padding: 4px 0; }
+.joint-toggle { display: flex; align-items: center; gap: 4px; width: 100%; margin-top: 8px; padding: 10px 0 2px; border: 0; border-top: 1px solid var(--line); background: none; color: var(--accent); font: inherit; font-size: 14px; font-weight: 700; cursor: pointer; }
+.joint-list { margin-top: 4px; }
+.joint-item { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; padding: 9px 0; border-top: 1px solid var(--line); }
+.joint-item-name { font-weight: 600; font-size: 15px; min-width: 0; }
+.joint-item-amt { font-weight: 700; font-size: 15px; flex-shrink: 0; }
 .toggle-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
 .toggle-row label { color: var(--muted); font-size: 14px; font-weight: 600; }
 
@@ -1502,6 +1507,7 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
   // Budget lines that add up from a detailed list
   const autoSource = name => ({ "deferred savings": "deferred", "joint deferred": "deferred-joint", "pets": "pets", "gift savings": "gifts" })[String(name).trim().toLowerCase()] || "";
   let view = WL_PREF.get("budgetView", "household"), openGroups = new Set(), openId = null, chain = Promise.resolve();
+  let jointOpen = false;
   let loadPromise = null;
   const api = () => window.NW;
   const fmt = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -1913,8 +1919,17 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
     if (joint.length) {
       const k = joint.reduce((t, i) => t + kyleAmt(i), 0), v = joint.reduce((t, i) => t + i.victoria, 0);
       const lines = view === "household" ? [["Kyle", k], ["Victoria", v], ["Total", k + v]] : view === "kyle" ? [["Kyle", k]] : [["Victoria", v]];
+      // The expenses behind those totals, biggest first (lines that are $0 in this view are left out)
+      const mine = i => (view === "kyle" ? kyleAmt(i) : view === "victoria" ? i.victoria : kyleAmt(i) + i.victoria);
+      const listed = joint.filter(i => mine(i) > 0.004).sort((a, b) => mine(b) - mine(a));
+      const esc = api().esc;
+      const itemsHtml = listed.map(i => `<div class="joint-item"><div class="joint-item-name">${esc(i.group ? i.group + " · " + i.name : i.name)}
+          ${view === "household" && kyleAmt(i) && i.victoria ? `<div class="b-sub">You ${fmt.format(kyleAmt(i))} · Victoria ${fmt.format(i.victoria)}</div>` : ""}</div>
+        <div class="joint-item-amt num">${fmt.format(mine(i))}</div></div>`).join("");
       jointHtml = `<section class="alloc"><p class="card-title">Pay into the joint account each month</p>
-        ${lines.map(([n, x]) => `<div class="joint-line"><span>${n}</span><span class="num">${fmt.format(x)}</span></div>`).join("")}</section>`;
+        ${lines.map(([n, x]) => `<div class="joint-line"><span>${n}</span><span class="num">${fmt.format(x)}</span></div>`).join("")}
+        <button class="joint-toggle" id="jointToggle" aria-expanded="${jointOpen}">${jointOpen ? "Hide" : "Show"} the ${listed.length} expense${listed.length === 1 ? "" : "s"} <span class="b-caret">${jointOpen ? "▲" : "▼"}</span></button>
+        ${jointOpen ? `<div class="joint-list">${itemsHtml}</div>` : ""}</section>`;
     }
 
     const sectionHtml = s => {
@@ -1998,6 +2013,8 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
       inp.onfocus = () => inp.select();
       inp.onkeydown = e => { if (e.key === "Enter") { e.preventDefault(); quickSave(inp.closest("[data-detail]").dataset.detail); } };
     });
+    const jt = document.getElementById("jointToggle");
+    if (jt) jt.onclick = () => { jointOpen = !jointOpen; render(); };
     document.getElementById("bAdd").onclick = () => openItem(null);
     document.getElementById("bIncome").onclick = openIncome;
     $b.querySelectorAll("[data-amt]").forEach(btn => { btn.onclick = e => { e.stopPropagation(); startInline(btn, "item"); }; btn.onkeydown = e => e.stopPropagation(); });
