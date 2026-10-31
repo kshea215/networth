@@ -158,6 +158,36 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
 .sync-pill[hidden] { display: none; }
 .sync-pill.warn { color: var(--down); }
 
+.row .row-amt.amt-edit { padding: 3px 10px; margin-right: -10px; min-width: 104px; box-sizing: border-box; text-align: right; line-height: 1.3; }
+.row .bal-input { margin-right: -10px; }
+
+/* Date for changes */
+.datebar { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 0 0 12px; padding: 8px 12px; border-radius: 14px; background: var(--surface); box-shadow: var(--shadow); }
+.datebar label { display: flex; align-items: center; gap: 10px; font-size: 14px; font-weight: 700; color: var(--muted); }
+.datebar input { font: inherit; font-weight: 700; color: var(--text); background: var(--surface-2); border: 0; border-radius: 10px; padding: 6px 10px; }
+.datebar.backdated { outline: 2px solid var(--accent); }
+.datebar.backdated label { color: var(--accent); }
+.datebar .chg-today { display: none; font-size: 13px; padding: 4px 0; white-space: nowrap; }
+.datebar.backdated .chg-today { display: inline; }
+
+/* Budget change log */
+.log-toggle { margin-top: 0; border-top: 0; padding: 12px 0; }
+.log-item { padding: 10px 0; border-top: 1px solid var(--line); }
+.log-top { display: flex; justify-content: space-between; gap: 10px; font-weight: 700; }
+.log-date { color: var(--muted); font-size: 13px; font-weight: 600; white-space: nowrap; }
+.log-amts { font-size: 15px; font-weight: 600; margin-top: 2px; }
+
+/* Paste balances */
+.paste-link { display: block; width: 100%; margin: -14px 0 18px; text-align: center; font-size: 14px; }
+.paste-box { width: 100%; box-sizing: border-box; font: inherit; font-size: 15px; line-height: 1.4; color: var(--text); background: var(--surface-2); border: 0; border-radius: 14px; padding: 12px; resize: vertical; margin-bottom: 12px; }
+.paste-row { padding: 10px 0; border-top: 1px solid var(--line); }
+.paste-row-top { display: flex; justify-content: space-between; gap: 10px; font-weight: 700; font-size: 15px; }
+.paste-row-top span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.paste-row-top span:last-child { white-space: nowrap; flex-shrink: 0; }
+.paste-row select { width: 100%; margin-top: 6px; font: inherit; font-size: 14px; color: var(--text); background: var(--surface-2); border: 0; border-radius: 10px; padding: 8px 10px; -webkit-appearance: none; appearance: none; }
+.paste-row.warn select { outline: 2px solid var(--down); }
+.paste-note { color: var(--muted); font-size: 13px; margin: 0 0 8px; }
+
 /* Compact summary that appears when the big one scrolls away */
 .mini {
   position: fixed; left: 50%; top: calc(env(safe-area-inset-top, 0px) + 6px); z-index: 12;
@@ -530,11 +560,11 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
   // ---------- Local-first store ----------
   // Every file lives on this phone. The app reads and writes the local copy, and a
   // sync step reconciles it with OneDrive whenever there's a connection.
-  const FILES = ["accounts.csv", "balances.csv", "budget.csv", "budget-settings.csv", "funds.csv", "pets.csv", "gifts.csv"];
-  const SYNC_ORDER = ["balances.csv", "accounts.csv", "funds.csv", "pets.csv", "gifts.csv", "budget.csv", "budget-settings.csv"];
+  const FILES = ["accounts.csv", "balances.csv", "budget.csv", "budget-settings.csv", "funds.csv", "pets.csv", "gifts.csv", "budget-log.csv"];
+  const SYNC_ORDER = ["balances.csv", "accounts.csv", "funds.csv", "pets.csv", "gifts.csv", "budget.csv", "budget-settings.csv", "budget-log.csv"];
   const KEYFN = {
     "accounts.csv": r => r.id, "balances.csv": r => r.date + "|" + r.account_id, "budget.csv": r => r.id,
-    "budget-settings.csv": r => r.key, "funds.csv": r => r.id, "pets.csv": r => r.id, "gifts.csv": r => r.id,
+    "budget-settings.csv": r => r.key, "funds.csv": r => r.id, "pets.csv": r => r.id, "gifts.csv": r => r.id, "budget-log.csv": r => r.id,
   };
   const mem = new Map();
   let storageWarned = false;
@@ -835,6 +865,11 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
     }).filter(p => p.count > 0);
   }
 
+  function balancesAsOf(date) {
+    const running = {};
+    [...state.snapshots].sort((a, b) => a.date.localeCompare(b.date)).filter(sn => sn.date <= date).forEach(sn => Object.assign(running, sn.balances));
+    return running;
+  }
   function latestBalances() {
     const running = {};
     [...state.snapshots].sort((a, b) => a.date.localeCompare(b.date)).forEach(s => Object.assign(running, s.balances));
@@ -907,7 +942,7 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
           }
           const open = openAcct === a.id;
           return `<div class="row acct-toggle" data-acct="${a.id}" role="button" tabindex="0" aria-expanded="${open}"><div class="row-name">${esc(a.name)}</div>
-            <div class="row-right"><div class="row-amt num">${v == null ? "—" : fmt0.format(v)}</div>${delta}</div></div>
+            <div class="row-right"><button class="row-amt num amt-edit" data-bal="${a.id}" aria-label="Edit ${esc(a.name)} balance">${v == null ? "—" : fmt0.format(v)}</button>${delta}</div></div>
             ${open ? `<div class="acct-chart" id="acctChart"></div>` : ""}`;
     }
 
@@ -967,6 +1002,8 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
       <div class="chart-wrap" id="chartWrap"></div>
       <div class="bars-wrap" id="barsWrap"></div>
       <button class="primary" id="updateBtn" ${active.length ? "" : "disabled"}>Update balances</button>
+      <button class="text-btn paste-link" id="pasteBtn" ${active.length ? "" : "disabled"}>Paste a list of balances instead</button>
+      ${dateBarHtml()}
       ${allocHtml}
       </div><div class="col col-b">
       ${CATEGORIES.map(groupHtml).join("")}
@@ -985,9 +1022,12 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
     bindMini($app);
     $app.querySelectorAll("[data-view]").forEach(b => b.onclick = () => { view = b.dataset.view; openAcct = null; render(); });
     document.getElementById("updateBtn").onclick = openUpdate;
+    document.getElementById("pasteBtn").onclick = openPaste;
+    bindDateBar($app);
     document.getElementById("manageBtn").onclick = openManage;
     document.getElementById("exportBtn").onclick = exportCSV;
     $app.querySelectorAll("[data-del]").forEach(b => b.onclick = () => deleteSnapshot(b.dataset.del));
+    $app.querySelectorAll("[data-bal]").forEach(btn => { btn.onclick = e => { e.stopPropagation(); startBalanceEdit(btn); }; btn.onkeydown = e => e.stopPropagation(); });
     $app.querySelectorAll(".acct-toggle").forEach(r => {
       const toggle = () => { openAcct = openAcct === r.dataset.acct ? null : r.dataset.acct; render(); };
       r.onclick = toggle;
@@ -1199,14 +1239,53 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
   $overlay.addEventListener("click", e => { if (e.target === $overlay) closeSheet(); });
   document.addEventListener("keydown", e => { if (e.key === "Escape" && $overlay.classList.contains("open")) closeSheet(); });
 
+  // Tap a balance in the list to change just that account. It's saved as today's entry.
+  function startBalanceEdit(btn) {
+    const id = btn.dataset.bal;
+    const a = state.accounts.find(x => x.id === id);
+    if (!a) return;
+    const cur = latestBalances()[id];
+    const inp = document.createElement("input");
+    inp.className = "amt-input num bal-input";
+    inp.setAttribute("inputmode", "decimal");
+    inp.setAttribute("autocomplete", "off");
+    inp.setAttribute("aria-label", a.kind === "liability" ? `${a.name}: amount you owe` : `${a.name}: balance`);
+    inp.value = cur != null ? cur.toFixed(2) : "";
+    btn.replaceWith(inp);
+    inp.focus(); inp.select();
+    let done = false;
+    const finish = async commit => {
+      if (done) return;
+      done = true;
+      const raw = inp.value.replace(/[$,\s]/g, ""), v = parseFloat(raw);
+      if (!commit || raw === "" || isNaN(v) || (cur != null && Math.abs(v - cur) < 0.005)) { render(); return; }
+      const date = changeDate();
+      let snap = state.snapshots.find(sn => sn.date === date);
+      if (!snap) { snap = { date, balances: { ...balancesAsOf(date) } }; state.snapshots.push(snap); }   // a new date starts from the balances as of that date
+      snap.balances[id] = Math.round(v * 100) / 100;
+      const newer = state.snapshots.some(sn => sn.date > date && sn.balances[id] != null);
+      render();
+      await persist();
+      toast(`${a.name} saved for ${shortDate(date)}${newer ? ". A newer entry exists, so the current balance is unchanged" : ""}`);
+    };
+    inp.onblur = () => finish(true);
+    inp.onclick = e => e.stopPropagation();
+    inp.onkeydown = e => {
+      e.stopPropagation();
+      if (e.key === "Enter") { e.preventDefault(); inp.blur(); }
+      else if (e.key === "Escape") { e.preventDefault(); finish(false); }
+    };
+  }
+
   // Update balances, one account at a time
   function openUpdate() {
     const active = state.accounts.filter(a => !a.archived).sort((a, b) => catOrder(a) - catOrder(b));
     if (!active.length) return;
     const last = latestBalances();
+    let date = changeDate();                  // the date picked on the main screen (today unless you changed it)
+    const base = balancesAsOf(date);
     const draft = {};
-    active.forEach(a => { if (last[a.id] != null) draft[a.id] = last[a.id]; });
-    let date = todayISO().slice(0, 8) + "01"; // entries are normalized to the 1st of the month
+    active.forEach(a => { if (base[a.id] != null) draft[a.id] = base[a.id]; });
     let i = 0;
 
     const step = () => {
@@ -1256,6 +1335,124 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
       amt.addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); next(); } });
     };
     step();
+  }
+
+  // Paste a list of balances (for example, read from screenshots by Claude), check the matches, then save
+  const normName = x => String(x).toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  function matchAccount(name, accts, used = new Set()) {
+    const n = normName(name);
+    if (!n) return null;
+    const nt = n.split(" ");
+    // Accounts whose names contain every word typed: if exactly one is left unclaimed, that's it; if several fit, I ask
+    const full = accts.filter(a => { const at = normName(a.name).split(" "); return nt.every(t => at.includes(t)); });
+    if (full.length) {
+      const pool = full.filter(a => !used.has(a.id));
+      const pick = pool.length ? pool : full;
+      return pick.length === 1 ? pick[0] : null;
+    }
+    // Otherwise the closest name, if it's clearly the best
+    const set = new Set(nt);
+    const scored = accts.filter(a => !used.has(a.id)).map(a => {
+      const at = new Set(normName(a.name).split(" "));
+      const overlap = [...set].filter(t => at.has(t)).length;
+      return { a, score: overlap ? (overlap / Math.min(set.size, at.size)) * 0.6 + (overlap / Math.max(set.size, at.size)) * 0.4 : 0 };
+    }).sort((x, y) => y.score - x.score);
+    if (!scored.length || scored[0].score < 0.6) return null;
+    if (scored[1] && scored[1].score >= scored[0].score - 0.001) return null;
+    return scored[0].a;
+  }
+  function parsePasted(text) {
+    const money = /\(?-?\$?\s*-?[\d,]*\.?\d+\)?/g;
+    const rows = [];
+    String(text).split(/\r?\n/).forEach(line => {
+      line = line.trim();
+      if (!line) return;
+      const found = [...line.matchAll(money)].filter(m => /\d/.test(m[0]));
+      if (!found.length) return;                                  // header or note line
+      const m = found[found.length - 1], tok = m[0];
+      const neg = /^\(/.test(tok) || /-/.test(tok);
+      const value = parseFloat(tok.replace(/[^0-9.]/g, ""));
+      if (isNaN(value)) return;
+      const name = line.slice(0, m.index).replace(/[\s:|,=\t\-–—]+$/g, "").replace(/^[\s•*\-–—\d.)]+(?=[A-Za-z])/, "").trim();
+      if (!name) return;
+      rows.push({ line, name, value: neg ? -value : value });
+    });
+    return rows;
+  }
+
+  function openPaste() {
+    const active = state.accounts.filter(a => !a.archived).sort((a, b) => catOrder(a) - catOrder(b));
+    if (!active.length) return;
+    let date = changeDate();
+    let text = "";
+
+    const input = () => {
+      openSheet(`
+        <div class="sheet-top"><h2>Paste balances</h2><button class="text-btn" id="px">Cancel</button></div>
+        <p class="step-kind">One account per line, like “Roth IRA: $79,037.40.” Debts can be positive, negative, or in parentheses. Accounts you leave out keep their last balance.</p>
+        <textarea id="ptext" class="paste-box" rows="9" placeholder="Chase Personal Checking: $2,590.73&#10;Chase Freedom Unlimited: ($501.04)&#10;Roth IRA: $79,037.40">${esc(text)}</textarea>
+        <div class="date-row"><span>As of</span><input type="date" id="pd" value="${date}" max="${todayISO()}"></div>
+        <button class="primary" id="review">Review</button>`);
+      document.getElementById("px").onclick = closeSheet;
+      document.getElementById("pd").onchange = e => { if (e.target.value) date = e.target.value; };
+      document.getElementById("review").onclick = () => {
+        text = document.getElementById("ptext").value;
+        const rows = parsePasted(text);
+        if (!rows.length) { toast("I couldn’t find any amounts in that"); return; }
+        review(rows);
+      };
+    };
+
+    const review = parsed => {
+      const used = new Set();
+      // Exact names first, then the looser matches, so a loose line can't take an account a later exact line needs
+      const rows = parsed.map(r => {
+        const ex = active.find(a => normName(a.name) === normName(r.name) && !used.has(a.id));
+        if (ex) used.add(ex.id);
+        return { ...r, acct: ex ? ex.id : "" };
+      });
+      rows.forEach(r => {
+        if (r.acct) return;
+        const a = matchAccount(r.name, active, used);
+        if (a && !used.has(a.id)) { used.add(a.id); r.acct = a.id; }   // an account already claimed by another line is left for me to assign
+      });
+      const last = latestBalances();
+      const shown = r => { const a = active.find(x => x.id === r.acct); return a && a.kind === "liability" ? `owe ${fmt2.format(Math.abs(r.value))}` : fmt2.format(r.value); };
+      const draw = () => {
+        const keep = document.getElementById("sheet").scrollTop;
+        const matched = rows.filter(r => r.acct).length, loose = rows.length - matched;
+        const skipped = active.length - new Set(rows.filter(r => r.acct).map(r => r.acct)).size;
+        openSheet(`
+          <div class="sheet-top"><h2>Review</h2><button class="text-btn" id="back">Back</button></div>
+          <p class="paste-note">${matched} matched${loose ? `, <b>${loose} need a look</b>` : ""}. ${skipped} account${skipped === 1 ? "" : "s"} keep their last balance. Check the matches below.</p>
+          ${rows.map((r, i) => `<div class="paste-row${r.acct ? "" : " warn"}">
+              <div class="paste-row-top"><span>${esc(r.name)}</span><span class="num">${esc(shown(r))}</span></div>
+              <select data-i="${i}" aria-label="Which account is ${esc(r.name)}?">
+                <option value="">${r.acct ? "Skip this line" : "Choose an account…"}</option>
+                ${active.map(a => `<option value="${a.id}" ${a.id === r.acct ? "selected" : ""}>${esc(a.name)}</option>`).join("")}
+              </select></div>`).join("")}
+          <button class="primary" id="save" style="margin-top:14px">Save ${matched} balance${matched === 1 ? "" : "s"}</button>`);
+        document.getElementById("sheet").scrollTop = keep;
+        document.getElementById("back").onclick = input;
+        document.getElementById("sheet").querySelectorAll("select[data-i]").forEach(sel => sel.onchange = () => { rows[+sel.dataset.i].acct = sel.value; draw(); });
+        document.getElementById("save").onclick = async () => {
+          const draft = { ...balancesAsOf(date) };
+          rows.forEach(r => {
+            if (!r.acct) return;
+            const a = active.find(x => x.id === r.acct);
+            draft[a.id] = Math.round((a.kind === "liability" ? Math.abs(r.value) : r.value) * 100) / 100;   // debts are stored as the amount you owe
+          });
+          const existing = state.snapshots.find(sn => sn.date === date);
+          if (existing) Object.assign(existing.balances, draft); else state.snapshots.push({ date, balances: draft });
+          closeSheet();
+          render();
+          await persist();
+          toast(`Saved ${rows.filter(r => r.acct).length} balances`);
+        };
+      };
+      draw();
+    };
+    input();
   }
 
   // Manage accounts
@@ -1402,7 +1599,25 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
     miniObservers.set(container, io);
     mini.onclick = () => window.scrollTo({ top: 0, behavior: "smooth" });
   }
-  window.NWUI = { bindMini };
+  // The date used for changes made from the lists. It's today unless you pick another, and resets when the app reopens.
+  let changeDateOverride = null;
+  const changeDate = () => changeDateOverride || todayISO();
+  function setChangeDate(d) {
+    changeDateOverride = d && d !== todayISO() ? d : null;
+    document.querySelectorAll(".datebar").forEach(bar => {
+      bar.classList.toggle("backdated", !!changeDateOverride);
+      const i = bar.querySelector(".chg-date"); if (i) i.value = changeDate();
+    });
+  }
+  const dateBarHtml = () => `<div class="datebar${changeDateOverride ? " backdated" : ""}"><label><span>Changes dated</span>
+      <input type="date" class="chg-date" value="${changeDate()}" max="${todayISO()}" aria-label="Date for changes"></label>
+      <button class="text-btn chg-today" type="button">Back to today</button></div>`;
+  function bindDateBar(container) {
+    const i = container.querySelector(".chg-date"), t = container.querySelector(".chg-today");
+    if (i) i.onchange = e => setChangeDate(e.target.value || null);
+    if (t) t.onclick = () => setChangeDate(null);
+  }
+  window.NWUI = { bindMini, changeDate, setChangeDate, dateBarHtml, bindDateBar, todayISO };
 
   // Shared with the Budget tab
   window.NW = { readFile, writeFile, parseCSV, toCSV, toast, openSheet, closeSheet, esc,
@@ -1508,6 +1723,7 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
   const autoSource = name => ({ "deferred savings": "deferred", "joint deferred": "deferred-joint", "pets": "pets", "gift savings": "gifts" })[String(name).trim().toLowerCase()] || "";
   let view = WL_PREF.get("budgetView", "household"), openGroups = new Set(), openId = null, chain = Promise.resolve();
   let jointOpen = false;
+  let log = [], baseline = { items: new Map(), settings: {} }, changeNote = "", logOpen = false, logShown = 40;
   let loadPromise = null;
   const api = () => window.NW;
   const fmt = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -1541,12 +1757,12 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
     },
     get: () => ({ ...settings }),
     shareFor: (kyleNet, ins, perMonth, vicNet) => { const k = kyleNet + ins * perMonth, t = k + vicNet; return t > 0 ? k / t : 0.5; },
-    async update(patch) { Object.assign(settings, patch); loaded = true; derive(); render(); await save(); },
+    async update(patch) { Object.assign(settings, patch); loaded = true; derive(); render(); changeNote = "Take-home or split changed"; await save(); },
     setView(v) { view = v; if (loaded) render(); },
     async reload() { if (!loaded) return; try { await pullFromStore(); render(); saveIfMigrated(); } catch (e) {} },
   };
   window.NWSYNC.onChange(names => {
-    if (["budget.csv", "budget-settings.csv", "funds.csv", "pets.csv", "gifts.csv"].some(n => names.has(n))) window.NWSYNC.whenSafe(() => window.BUDGET.reload());
+    if (["budget.csv", "budget-settings.csv", "funds.csv", "pets.csv", "gifts.csv", "budget-log.csv"].some(n => names.has(n))) window.NWSYNC.whenSafe(() => window.BUDGET.reload());
   });
 
   // ---------- data ----------
@@ -1567,12 +1783,14 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
   function load() { loadPromise = doLoad(); return loadPromise; }
   async function pullFromStore() {
     const a = api();
-    const [it, st, fu, pe, gi] = await Promise.all(["budget.csv", "budget-settings.csv", "funds.csv", "pets.csv", "gifts.csv"].map(n => a.readFile(n)));
+    const [it, st, fu, pe, gi, lg] = await Promise.all(["budget.csv", "budget-settings.csv", "funds.csv", "pets.csv", "gifts.csv", "budget-log.csv"].map(n => a.readFile(n)));
     const d = fromCSV(it.text, st.text);
     items = d.list; settings = d.set;
     parseDetail(fu.text, pe.text, gi.text);
+    log = parseLog(lg.text);
     if (migrateUtilities()) needsSave = true;
     derive();
+    baseline = takeBaseline();          // what's loaded isn't a "change"; only edits from here on are logged
     loaded = true;
   }
   const saveIfMigrated = () => { if (needsSave) { needsSave = false; save(); } };
@@ -1671,7 +1889,40 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
   const hasDetail = it => (it.source === "deferred" || it.source === "deferred-joint") ? funds.length > 0
     : it.source === "pets" ? pets.length > 0 : it.source === "gifts" ? gifts.length > 0 : false;
 
+  // ---------- change log ----------
+  const LOG_HEAD = ["id", "date", "logged_at", "item_id", "item", "kyle_old", "kyle_new", "victoria_old", "victoria_new", "note"];
+  function parseLog(text) {
+    return text ? api().parseCSV(text).map(r => ({ id: r.id, date: r.date, at: r.logged_at || "", item_id: r.item_id || "", item: r.item || "",
+      ko: num(r.kyle_old), kn: num(r.kyle_new), vo: num(r.victoria_old), vn: num(r.victoria_new), note: r.note || "" })).filter(e => e.id && e.date) : [];
+  }
+  const SETTING_LABELS = { kyle_net: ["Kyle’s monthly take-home", "kyle"], victoria_net: ["Victoria’s monthly take-home", "victoria"], kyle_own_insurance: ["Kyle’s own health insurance (per paycheck)", "kyle"] };
+  function takeBaseline() {
+    return { items: new Map(items.map(i => [i.id, { name: i.name, k: round2(kyleAmt(i)), v: round2(i.victoria) }])),
+             settings: Object.fromEntries(Object.keys(SETTING_LABELS).map(k => [k, round2(settings[k] || 0)])) };
+  }
+  // Compare with what was last saved and log every amount that moved, dated with the date picked on the main screen
+  function recordChanges() {
+    const when = window.NWUI.changeDate(), at = new Date().toISOString(), note = changeNote;
+    changeNote = "";
+    const out = [], seen = new Set();
+    items.forEach(i => {
+      seen.add(i.id);
+      const b = baseline.items.get(i.id), k = round2(kyleAmt(i)), v = round2(i.victoria), ko = b ? b.k : 0, vo = b ? b.v : 0;
+      if (Math.abs(k - ko) < 0.005 && Math.abs(v - vo) < 0.005) return;
+      out.push({ item_id: i.id, item: i.name, ko, kn: k, vo, vn: v, note: b ? (note || "Edited") : (note || "New item") });
+    });
+    baseline.items.forEach((b, id) => { if (!seen.has(id) && (b.k || b.v)) out.push({ item_id: id, item: b.name, ko: b.k, kn: 0, vo: b.v, vn: 0, note: "Removed" }); });
+    Object.entries(SETTING_LABELS).forEach(([key, [label, who]]) => {
+      const nv = round2(settings[key] || 0), ov = baseline.settings[key] != null ? baseline.settings[key] : nv;
+      if (Math.abs(nv - ov) < 0.005) return;
+      out.push({ item_id: "setting:" + key, item: label, ko: who === "kyle" ? ov : 0, kn: who === "kyle" ? nv : 0, vo: who === "victoria" ? ov : 0, vn: who === "victoria" ? nv : 0, note: note || "Edited" });
+    });
+    out.forEach(e => log.push({ id: newId(), date: when, at, ...e }));
+    baseline = takeBaseline();
+  }
+
   function save(extra = []) {
+    recordChanges();
     const a = api();
     const itemsCSV = a.toCSV(["id", "name", "section", "group", "kyle_p1", "kyle_p2", "victoria", "joint", "method", "note", "source", "split"],
       items.map(i => [i.id, i.name, i.section, i.group, i.kyle_p1.toFixed(2), i.kyle_p2.toFixed(2), i.victoria.toFixed(2), i.joint ? "true" : "false", i.method, i.note, i.source || "", i.split || "fixed"]));
@@ -1679,6 +1930,7 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
     extra.forEach(k => a.writeFile(`${k}.csv`, DETAIL_FILES[k]()));
     a.writeFile("budget.csv", itemsCSV);
     a.writeFile("budget-settings.csv", setCSV);
+    a.writeFile("budget-log.csv", a.toCSV(LOG_HEAD, log.map(e => [e.id, e.date, e.at, e.item_id, e.item, e.ko.toFixed(2), e.kn.toFixed(2), e.vo.toFixed(2), e.vn.toFixed(2), e.note])));
     a.afterSave();
     return Promise.resolve();
   }
@@ -1795,7 +2047,7 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
     });
     openId = null;
     derive(); render();
-    if (changed) await save([type === "fund" ? "funds" : type === "pet" ? "pets" : "gifts"]);
+    if (changed) { changeNote = "List item changed"; await save([type === "fund" ? "funds" : type === "pet" ? "pets" : "gifts"]); }
   }
 
   // Type a new amount right in the list. What the number means depends on the view you're in.
@@ -1853,6 +2105,7 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
       if (!commit || Math.abs(v - current) < 0.005) { render(); return; }
       if (isItem) applyInline(items.find(i => i.id === key), v); else applyChildInline(key, v);
       render();
+      changeNote = isItem ? `Typed in the ${view === "household" ? "household" : view === "kyle" ? "Kyle" : "Victoria"} view` : "List item changed";
       await save(isItem ? [] : [key.startsWith("fund") ? "funds" : "pets"]);
     };
     inp.onblur = () => finish(true);
@@ -1877,7 +2130,7 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
     });
     openId = null;
     render();
-    if (changed) await save();
+    if (changed) { changeNote = "Edited in the list"; await save(); }
   }
 
   function render() {
@@ -1978,8 +2231,10 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
       <div style="height:14px"></div>
       ${allocHtml}${payHtml}${jointHtml}
       </div><div class="col col-b">
+      ${window.NWUI.dateBarHtml()}
       ${SECTIONS.map(sectionHtml).join("")}
       ${idle.length ? `<details class="history"><summary>Not budgeted (${idle.length})</summary>${idle.map(i => itemRow(i)).join("")}</details>` : ""}
+      ${logHtml()}
       <div class="footer">
         <button class="secondary" id="bAdd">Add item</button>
         <button class="secondary" id="bIncome">Income</button>
@@ -2013,6 +2268,11 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
       inp.onfocus = () => inp.select();
       inp.onkeydown = e => { if (e.key === "Enter") { e.preventDefault(); quickSave(inp.closest("[data-detail]").dataset.detail); } };
     });
+    window.NWUI.bindDateBar($b);
+    const lt = document.getElementById("logToggle");
+    if (lt) lt.onclick = () => { logOpen = !logOpen; render(); };
+    const lmore = document.getElementById("logMore");
+    if (lmore) lmore.onclick = () => { logShown += 40; render(); };
     const jt = document.getElementById("jointToggle");
     if (jt) jt.onclick = () => { jointOpen = !jointOpen; render(); };
     document.getElementById("bAdd").onclick = () => openItem(null);
@@ -2020,6 +2280,24 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
     $b.querySelectorAll("[data-amt]").forEach(btn => { btn.onclick = e => { e.stopPropagation(); startInline(btn, "item"); }; btn.onkeydown = e => e.stopPropagation(); });
     $b.querySelectorAll("[data-camt]").forEach(btn => { btn.onclick = e => { e.stopPropagation(); startInline(btn, "child"); }; btn.onkeydown = e => e.stopPropagation(); });
     window.NWUI.bindMini($b);
+  }
+
+  // The change log: what each amount was and became, newest first, for whoever's view you're in
+  function logHtml() {
+    const esc = api().esc;
+    const pair = e => (view === "kyle" ? [e.ko, e.kn] : view === "victoria" ? [e.vo, e.vn] : [e.ko + e.vo, e.kn + e.vn]);
+    const entries = log.filter(e => { const [o, n] = pair(e); return Math.abs(n - o) >= 0.005; })
+      .sort((a, b) => b.date.localeCompare(a.date) || b.at.localeCompare(a.at));
+    const dfmt = iso => { const [y, m, d] = iso.split("-").map(Number); return new Date(y, m - 1, d).toLocaleDateString("en-US", { month: "short", day: "numeric", year: y === new Date().getFullYear() ? undefined : "numeric" }); };
+    const rows = entries.slice(0, logShown).map(e => {
+      const [o, n] = pair(e);
+      const both = view === "household" && e.ko !== e.kn && e.vo !== e.vn;
+      return `<div class="log-item"><div class="log-top"><span class="log-name">${esc(e.item)}</span><span class="log-date">${dfmt(e.date)}</span></div>
+        <div class="log-amts num">${fmt.format(o)} → ${fmt.format(n)} <span class="b-sub">${esc(e.note)}</span></div>
+        ${both ? `<div class="b-sub num">You ${fmt.format(e.ko)} → ${fmt.format(e.kn)} · Victoria ${fmt.format(e.vo)} → ${fmt.format(e.vn)}</div>` : ""}</div>`;
+    }).join("");
+    return `<section class="group"><button class="joint-toggle log-toggle" id="logToggle" aria-expanded="${logOpen}">Change log (${entries.length}) <span class="b-caret">${logOpen ? "▲" : "▼"}</span></button>
+      ${logOpen ? (rows ? rows + (entries.length > logShown ? `<button class="text-btn" id="logMore">Show more</button>` : "") : `<p class="paste-note">No changes yet. Edits to amounts will show up here.</p>`) : ""}</section>`;
   }
 
   function renderEmpty() {
@@ -2102,12 +2380,14 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
       let target = it;
       if (id) Object.assign(it, next); else { target = { id: newId(), source: "", ...next }; items.push(target); }
       if (split === "income" && !target.source) setTotal(target, num(document.getElementById("btot").value));
+      if (id) changeNote = "Edited item";
       a.closeSheet(); render(); await save();
     };
     const del = document.getElementById("bdel");
     if (del) del.onclick = async () => {
       if (!confirm(`Delete ${it.name}?`)) return;
       items = items.filter(i => i.id !== id);
+      changeNote = "Removed";
       a.closeSheet(); render(); await save();
     };
   }
@@ -2137,11 +2417,13 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
     }
     document.getElementById("dsave").onclick = async () => {
       if (onSave() === false) return;
+      changeNote = "List changed";
       derive(); a.closeSheet(); render(); await save([kind]);
     };
     const del = document.getElementById("ddel");
     if (del) del.onclick = async () => {
       if (!confirm("Delete this?")) return;
+      changeNote = "List changed";
       onDelete(); derive(); a.closeSheet(); render(); await save([kind]);
     };
   }
@@ -2245,6 +2527,7 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
       settings.victoria_gross = num(document.getElementById("ivg").value);
       loaded = true;
       derive();
+      changeNote = "Take-home or split changed";
       a.closeSheet(); render(); await save();
     };
   }
