@@ -176,6 +176,11 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
 .log-top { display: flex; justify-content: space-between; gap: 10px; font-weight: 700; }
 .log-date { color: var(--muted); font-size: 13px; font-weight: 600; white-space: nowrap; }
 .log-amts { font-size: 15px; font-weight: 600; margin-top: 2px; }
+.log-item.child { padding: 8px 0 8px 14px; }
+.log-item.child .log-amts { margin-top: 0; }
+.log-date-strong { font-size: 14px; font-weight: 700; color: var(--muted); }
+.log-latest { text-align: right; flex-shrink: 0; font-weight: 700; }
+.log-latest .b-sub { font-weight: 500; }
 
 /* Paste balances */
 .paste-link { display: block; width: 100%; margin: -14px 0 18px; text-align: center; font-size: 14px; }
@@ -1704,7 +1709,8 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
     { id: "savings", name: "Savings", color: "#30D158" },
   ];
   const VIEWS = [["household", "Household"], ["kyle", "Kyle"], ["victoria", "Victoria"]];
-  const DEFAULT_SETTINGS = { kyle_gross: 0, victoria_gross: 0, kyle_net: 0, victoria_net: 0, kyle_own_insurance: 50, paychecks_per_month: 2 };
+  const DEFAULT_SETTINGS = { kyle_gross: 0, victoria_gross: 0, kyle_net: 0, victoria_net: 0, kyle_own_insurance: 50, paychecks_per_month: 2,
+    home_price: 470000, down_pct: 20, loan_rate: 7, loan_years: 30 };
   let items = [], settings = { ...DEFAULT_SETTINGS };
   let funds = [], pets = [], gifts = [];
   let etag = { items: null, settings: null, funds: null, pets: null, gifts: null }, loaded = false, loading = false, ready = !!window.__nwReady;
@@ -1720,10 +1726,11 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
   const SPLIT_BY_INCOME = ["mortgage/rent", "property taxes", "homeowners insurance", "hoa", "utilities (gas, electric, water)", "verizon fios"];
   const autoSplit = name => (SPLIT_BY_INCOME.includes(String(name).trim().toLowerCase()) ? "income" : "fixed");
   // Budget lines that add up from a detailed list
-  const autoSource = name => ({ "deferred savings": "deferred", "joint deferred": "deferred-joint", "pets": "pets", "gift savings": "gifts" })[String(name).trim().toLowerCase()] || "";
+  const autoSource = name => ({ "deferred savings": "deferred", "joint deferred": "deferred-joint", "pets": "pets", "gift savings": "gifts", "mortgage/rent": "mortgage" })[String(name).trim().toLowerCase()] || "";
   let view = WL_PREF.get("budgetView", "household"), openGroups = new Set(), openId = null, chain = Promise.resolve();
   let jointOpen = false;
   let log = [], baseline = { items: new Map(), settings: {} }, changeNote = "", logOpen = false, logShown = 40;
+  const logOpenItems = new Set();       // which budget items are expanded in the change log
   let loadPromise = null;
   const api = () => window.NW;
   const fmt = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -1757,7 +1764,8 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
     },
     get: () => ({ ...settings }),
     shareFor: (kyleNet, ins, perMonth, vicNet) => { const k = kyleNet + ins * perMonth, t = k + vicNet; return t > 0 ? k / t : 0.5; },
-    async update(patch) { Object.assign(settings, patch); loaded = true; derive(); render(); changeNote = "Take-home or split changed"; await save(); },
+    async update(patch, note) { Object.assign(settings, patch); loaded = true; derive(); render(); changeNote = note || "Take-home or split changed"; await save(); },
+    loanMath: (price, down, rate, years) => loanMath(price, down, rate, years),
     setView(v) { view = v; if (loaded) render(); },
     async reload() { if (!loaded) return; try { await pullFromStore(); render(); saveIfMigrated(); } catch (e) {} },
   };
@@ -1776,7 +1784,7 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
       split: r.split === "income" || r.split === "fixed" ? r.split : autoSplit(r.name),
     })).filter(i => i.id && i.name) : [];
     const set = { ...DEFAULT_SETTINGS };
-    if (settingsText) a.parseCSV(settingsText).forEach(r => { if (r.key) set[r.key] = num(r.value); });
+    if (settingsText) a.parseCSV(settingsText).forEach(r => { if (r.key) { const v = parseFloat(String(r.value).replace(/[$,\s]/g, "")); set[r.key] = isNaN(v) ? 0 : v; } });
     return { list, set };
   }
 
@@ -1848,6 +1856,8 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
         setKyle(it, round2(sum(pets, petMonthly)));
       } else if (it.source === "gifts" && gifts.length) {
         setKyle(it, round2(sum(gifts, giftYear) / 12));
+      } else if (it.source === "mortgage" && loanReady()) {
+        setTotal(it, loanNow().pi);                      // shared bill: split by take-home pay like before
       } else if (it.split === "income" && !it.source) {
         setTotal(it, round2(kyleAmt(it) + it.victoria));
       }
@@ -1886,8 +1896,18 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
     items.splice(idx, 1, ...fresh);
     return true;
   }
+  // Monthly principal and interest on the home loan, from the purchase price, down payment, rate, and term
+  const loanMath = (price, downPct, ratePct, years) => {
+    const loan = round2(price * (1 - downPct / 100)), n = Math.round(years * 12), r = ratePct / 100 / 12;
+    const pi = loan > 0 && n > 0 ? (r === 0 ? loan / n : (loan * r) / (1 - Math.pow(1 + r, -n))) : 0;
+    return { loan, pi: round2(pi), months: n, paid: round2(round2(pi) * n) };
+  };
+  const loanNow = () => loanMath(settings.home_price, settings.down_pct, settings.loan_rate, settings.loan_years);
+  const loanReady = () => settings.home_price > 0 && settings.loan_years > 0 && settings.loan_rate >= 0 && settings.down_pct >= 0 && settings.down_pct < 100;
+  const mortgageHint = () => { const L = loanNow(); return `Principal and interest on a ${fmt0.format(L.loan)} loan at ${settings.loan_rate.toFixed(3)}% for ${settings.loan_years} years. Change the price, rate, or term in Settings.`; };
+  // Budget lines that add up from a detailed list (or from the home loan)
   const hasDetail = it => (it.source === "deferred" || it.source === "deferred-joint") ? funds.length > 0
-    : it.source === "pets" ? pets.length > 0 : it.source === "gifts" ? gifts.length > 0 : false;
+    : it.source === "pets" ? pets.length > 0 : it.source === "gifts" ? gifts.length > 0 : it.source === "mortgage" ? loanReady() : false;
 
   // ---------- change log ----------
   const LOG_HEAD = ["id", "date", "logged_at", "item_id", "item", "kyle_old", "kyle_new", "victoria_old", "victoria_new", "note"];
@@ -1975,6 +1995,7 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
       hint = i.source === "deferred" ? "Each person’s funds are listed in their own view."
         : i.source === "deferred-joint" ? "Joint funds are listed in the Household view."
         : i.source === "pets" ? "Pet costs are listed in Kyle’s view."
+        : i.source === "mortgage" ? mortgageHint()
         : view === "victoria" ? "" : "Kyle’s gift list is in Kyle’s view.";
     }
     html += `<div class="b-detail${child ? " child" : ""}" data-detail="${i.id}">
@@ -2271,8 +2292,10 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
     window.NWUI.bindDateBar($b);
     const lt = document.getElementById("logToggle");
     if (lt) lt.onclick = () => { logOpen = !logOpen; render(); };
-    const lmore = document.getElementById("logMore");
-    if (lmore) lmore.onclick = () => { logShown += 40; render(); };
+    $b.querySelectorAll("[data-lgroup]").forEach(r => {
+      const t = () => { const k = r.dataset.lgroup; logOpenItems.has(k) ? logOpenItems.delete(k) : logOpenItems.add(k); render(); };
+      r.onclick = t; r.onkeydown = e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); t(); } };
+    });
     const jt = document.getElementById("jointToggle");
     if (jt) jt.onclick = () => { jointOpen = !jointOpen; render(); };
     document.getElementById("bAdd").onclick = () => openItem(null);
@@ -2282,22 +2305,47 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
     window.NWUI.bindMini($b);
   }
 
-  // The change log: what each amount was and became, newest first, for whoever's view you're in
+  // The change log, sorted into one group per budget item (in budget order). Tap an item to see its history, newest first.
   function logHtml() {
     const esc = api().esc;
     const pair = e => (view === "kyle" ? [e.ko, e.kn] : view === "victoria" ? [e.vo, e.vn] : [e.ko + e.vo, e.kn + e.vn]);
-    const entries = log.filter(e => { const [o, n] = pair(e); return Math.abs(n - o) >= 0.005; })
-      .sort((a, b) => b.date.localeCompare(a.date) || b.at.localeCompare(a.at));
+    const entries = log.filter(e => { const [o, n] = pair(e); return Math.abs(n - o) >= 0.005; });
+    const newest = (x, y) => y.date.localeCompare(x.date) || y.at.localeCompare(x.at);
     const dfmt = iso => { const [y, m, d] = iso.split("-").map(Number); return new Date(y, m - 1, d).toLocaleDateString("en-US", { month: "short", day: "numeric", year: y === new Date().getFullYear() ? undefined : "numeric" }); };
-    const rows = entries.slice(0, logShown).map(e => {
-      const [o, n] = pair(e);
-      const both = view === "household" && e.ko !== e.kn && e.vo !== e.vn;
-      return `<div class="log-item"><div class="log-top"><span class="log-name">${esc(e.item)}</span><span class="log-date">${dfmt(e.date)}</span></div>
-        <div class="log-amts num">${fmt.format(o)} → ${fmt.format(n)} <span class="b-sub">${esc(e.note)}</span></div>
-        ${both ? `<div class="b-sub num">You ${fmt.format(e.ko)} → ${fmt.format(e.kn)} · Victoria ${fmt.format(e.vo)} → ${fmt.format(e.vn)}</div>` : ""}</div>`;
+
+    const byItem = new Map();
+    entries.forEach(e => { if (!byItem.has(e.item_id)) byItem.set(e.item_id, []); byItem.get(e.item_id).push(e); });
+    const secRank = Object.fromEntries(SECTIONS.map((sec, i) => [sec.id, i]));
+    const pos = new Map(items.map((i, idx) => [i.id, idx]));
+    const groups = [...byItem.entries()].map(([id, list]) => {
+      list.sort(newest);
+      const it = items.find(x => x.id === id);
+      return {
+        id, list, it,
+        rank: it ? (secRank[it.section] != null ? secRank[it.section] : 9) * 1000 + pos.get(id) : id.startsWith("setting:") ? 20000 : 10000,   // budget order, then removed items, then take-home settings
+        name: it ? (it.group ? it.group + " · " + it.name : it.name) : list[0].item,
+        current: it ? amt(it) : pair(list[0])[1],
+      };
+    }).sort((x, y) => x.rank - y.rank || y.list[0].date.localeCompare(x.list[0].date));
+
+    const body = groups.map(g => {
+      const open = logOpenItems.has(g.id);
+      const head = `<div class="b-row log-group" data-lgroup="${esc(g.id)}" role="button" tabindex="0" aria-expanded="${open}">
+        <div class="b-name">${esc(g.name)}${g.it || g.id.startsWith("setting:") ? "" : `<span class="b-sub"> (removed)</span>`}<span class="b-caret">${open ? "▲" : "▼"} ${g.list.length}</span></div>
+        <div class="log-latest"><span class="num">${fmt.format(g.current)}</span><div class="b-sub">last ${dfmt(g.list[0].date)}</div></div></div>`;
+      if (!open) return head;
+      return head + g.list.map(e => {
+        const [o, n] = pair(e);
+        const both = view === "household" && e.ko !== e.kn && e.vo !== e.vn;
+        return `<div class="log-item child"><div class="log-top"><span class="log-date-strong">${dfmt(e.date)}</span><span class="log-amts num">${fmt.format(o)} → ${fmt.format(n)}</span></div>
+          <div class="b-sub">${esc(e.note)}</div>
+          ${both ? `<div class="b-sub num">You ${fmt.format(e.ko)} → ${fmt.format(e.kn)} · Victoria ${fmt.format(e.vo)} → ${fmt.format(e.vn)}</div>` : ""}</div>`;
+      }).join("");
     }).join("");
-    return `<section class="group"><button class="joint-toggle log-toggle" id="logToggle" aria-expanded="${logOpen}">Change log (${entries.length}) <span class="b-caret">${logOpen ? "▲" : "▼"}</span></button>
-      ${logOpen ? (rows ? rows + (entries.length > logShown ? `<button class="text-btn" id="logMore">Show more</button>` : "") : `<p class="paste-note">No changes yet. Edits to amounts will show up here.</p>`) : ""}</section>`;
+
+    const summary = `${entries.length} change${entries.length === 1 ? "" : "s"} across ${groups.length} item${groups.length === 1 ? "" : "s"}`;
+    return `<section class="group"><button class="joint-toggle log-toggle" id="logToggle" aria-expanded="${logOpen}">Change log (${summary}) <span class="b-caret">${logOpen ? "▲" : "▼"}</span></button>
+      ${logOpen ? (body || `<p class="paste-note">No changes yet. Edits to amounts will show up here, sorted by budget item.</p>`) : ""}</section>`;
   }
 
   function renderEmpty() {
@@ -2569,6 +2617,16 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
         <p class="set-preview" id="sPreview"></p>
         <button class="primary" id="sSave" style="margin:0">Save and recalculate</button>
       </section>
+      <section class="set-section">
+        <h2>Home loan</h2>
+        <p class="set-note">Your monthly principal and interest comes from these, and it fills in the Mortgage/Rent line in your budget.</p>
+        ${field("sHp", "Purchase price", st.home_price ? String(st.home_price) : "")}
+        ${field("sDp", "Down payment (%)", String(st.down_pct))}
+        ${field("sLr", "Interest rate (%)", Number(st.loan_rate).toFixed(3))}
+        ${field("sLy", "Term (years)", String(st.loan_years))}
+        <p class="set-preview" id="sLoan"></p>
+        <button class="primary" id="sLoanSave" style="margin:0">Save home loan</button>
+      </section>
       </div><div class="col col-b">
       <section class="set-section">
         <h2>Display</h2>
@@ -2608,6 +2666,26 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
     });
     preview();
 
+    const loanVals = () => {
+      const f = id => parseFloat(String(document.getElementById(id).value).replace(/[^0-9.]/g, ""));
+      return { price: f("sHp") || 0, down: isNaN(f("sDp")) ? 0 : f("sDp"), rate: isNaN(f("sLr")) ? 0 : f("sLr"), years: f("sLy") || 0 };
+    };
+    const loanPreview = () => {
+      const v = loanVals(), L = window.BUDGET.loanMath(v.price, v.down, v.rate, v.years);
+      document.getElementById("sLoan").innerHTML = L.pi
+        ? `<b>${fmt.format(L.pi)}</b> a month <span>for principal and interest on a ${fmt.format(L.loan).replace(".00", "")} loan. Over the full term you’d pay ${fmt.format(L.paid).replace(".00", "")}, with ${fmt.format(L.paid - L.loan).replace(".00", "")} of it interest.</span>`
+        : `<span>Enter a price, rate, and term to see the payment.</span>`;
+    };
+    ["sHp", "sDp", "sLr", "sLy"].forEach(id => document.getElementById(id).addEventListener("input", loanPreview));
+    loanPreview();
+    document.getElementById("sLoanSave").onclick = async () => {
+      const v = loanVals();
+      if (!(v.price > 0)) { window.NW.toast("Enter the purchase price"); return; }
+      if (v.down < 0 || v.down >= 100) { window.NW.toast("Down payment should be between 0 and 99%"); return; }
+      if (v.rate < 0 || v.rate > 25) { window.NW.toast("Interest rate should be between 0 and 25%"); return; }
+      if (!(v.years >= 1 && v.years <= 50)) { window.NW.toast("Term should be 1 to 50 years"); return; }
+      await window.BUDGET.update({ home_price: v.price, down_pct: v.down, loan_rate: v.rate, loan_years: v.years }, "Home loan changed");
+    };
     document.getElementById("sSave").onclick = async () => {
       await window.BUDGET.update({
         kyle_net: num(document.getElementById("sKn").value),
