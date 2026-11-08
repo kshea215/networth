@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Worthwhile</title>
 <meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Worthwhile">
 <meta name="theme-color" content="#000000" id="themeColor">
 <script>
@@ -31,7 +31,11 @@ window.WL_PREF = {
     if (web && !link) { link = document.createElement("link"); link.id = "webFont"; link.rel = "stylesheet"; document.head.appendChild(link); }
     if (web) link.href = `https://fonts.googleapis.com/css2?family=${web}&display=swap`;
   };
-  WL_APPLY_THEME(); WL_APPLY_FONT();
+  window.WL_APPLY_NAV = function () {
+    document.documentElement.dataset.nav = WL_PREF.get("nav", "bottom");
+    document.documentElement.style.setProperty("--rail-top", WL_PREF.get("railTop", "42") + "vh");
+  };
+  WL_APPLY_THEME(); WL_APPLY_FONT(); WL_APPLY_NAV();
   mq.addEventListener ? mq.addEventListener("change", WL_APPLY_THEME) : mq.addListener(WL_APPLY_THEME);
 })();
 </script>
@@ -192,6 +196,31 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
 .paste-row select { width: 100%; margin-top: 6px; font: inherit; font-size: 14px; color: var(--text); background: var(--surface-2); border: 0; border-radius: 10px; padding: 8px 10px; -webkit-appearance: none; appearance: none; }
 .paste-row.warn select { outline: 2px solid var(--down); }
 .paste-note { color: var(--muted); font-size: 13px; margin: 0 0 8px; }
+
+/* Drawing under the status area, and the optional side strip */
+:root { --sai-t: env(safe-area-inset-top, 0px); --sai-r: env(safe-area-inset-right, 0px); --sai-b: env(safe-area-inset-bottom, 0px); --sai-l: env(safe-area-inset-left, 0px);
+  --rail-w: max(var(--sai-r), 78px); --rail-top: 42vh; padding-left: var(--sai-l); padding-right: var(--sai-r); }
+/* In light mode the system draws white status text, so give it a dark backing; dark mode is already black */
+html:not([data-theme="dark"]) body::before { content: ""; position: fixed; inset: 0 0 auto 0; height: var(--sai-t); background: #000; z-index: 60; pointer-events: none; }
+html:not([data-theme="dark"]) body::after { content: ""; position: fixed; inset: 0 0 0 auto; width: var(--sai-r); background: #000; z-index: 60; pointer-events: none; }
+html:not([data-theme="dark"])::before { content: ""; position: fixed; inset: 0 auto 0 0; width: var(--sai-l); background: #000; z-index: 60; pointer-events: none; }
+.siderail { display: none; }
+html[data-nav="side"] .tabbar { display: none; }
+html[data-nav="side"] { padding-right: var(--rail-w); }
+html[data-nav="side"] .siderail {
+  display: flex; flex-direction: column; gap: 6px; position: fixed; z-index: 65; top: var(--rail-top);
+  right: max(4px, calc((var(--rail-w) - 70px) / 2)); padding: 6px; border-radius: 26px;
+  background: var(--glass); border: 1px solid var(--glass-edge);
+  -webkit-backdrop-filter: blur(24px) saturate(180%); backdrop-filter: blur(24px) saturate(180%);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.22), inset 0 1px 0 var(--glass-shine);
+}
+.siderail button { width: 56px; height: 60px; border: 0; background: transparent; color: var(--muted); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; border-radius: 20px; font: inherit; font-size: 10px; font-weight: 700; -webkit-tap-highlight-color: transparent; }
+.siderail button[aria-pressed="true"] { color: var(--text); background: var(--glass-active); }
+.siderail svg { width: 22px; height: 22px; }
+html[data-nav="side"] main { padding-bottom: 32px !important; }
+html[data-nav="side"] .mini, html[data-nav="side"] .sync-pill, html[data-nav="side"] .toast { left: calc(50% - var(--rail-w) / 2); }
+html[data-nav="side"] .sync-pill { bottom: calc(14px + var(--sai-b)); }
+html[data-nav="side"] .toast { bottom: calc(64px + var(--sai-b)); }
 
 /* Compact summary that appears when the big one scrolls away */
 .mini {
@@ -434,6 +463,20 @@ details.history[open] summary::after { content: "Hide"; }
   <button data-tab="nw" aria-pressed="true">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 17l5-5 4 3 8-8"/><path d="M15 7h5v5"/></svg>
     <span>Net Worth</span>
+  </button>
+  <button data-tab="budget" aria-pressed="false">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M3 9h18"/><path d="M8 14h3"/><path d="M8 17h6"/></svg>
+    <span>Budget</span>
+  </button>
+  <button data-tab="settings" aria-pressed="false">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h10"/><path d="M18 6h2"/><circle cx="16" cy="6" r="2"/><path d="M4 12h4"/><path d="M12 12h8"/><circle cx="10" cy="12" r="2"/><path d="M4 18h12"/><path d="M20 18h0"/><circle cx="18" cy="18" r="2"/></svg>
+    <span>Settings</span>
+  </button>
+</nav>
+<nav class="siderail" aria-label="Sections">
+  <button data-tab="nw" aria-pressed="true">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 17l5-5 4 3 8-8"/><path d="M15 7h5v5"/></svg>
+    <span>Worth</span>
   </button>
   <button data-tab="budget" aria-pressed="false">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M3 9h18"/><path d="M8 14h3"/><path d="M8 17h6"/></svg>
@@ -1710,7 +1753,7 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
   ];
   const VIEWS = [["household", "Household"], ["kyle", "Kyle"], ["victoria", "Victoria"]];
   const DEFAULT_SETTINGS = { kyle_gross: 0, victoria_gross: 0, kyle_net: 0, victoria_net: 0, kyle_own_insurance: 50, paychecks_per_month: 2,
-    home_price: 470000, down_pct: 20, loan_rate: 7, loan_years: 30 };
+    home_price: 470000, down_pct: 20, loan_rate: 7, loan_years: 30, joint_fixed_v1: 0 };
   let items = [], settings = { ...DEFAULT_SETTINGS };
   let funds = [], pets = [], gifts = [];
   let etag = { items: null, settings: null, funds: null, pets: null, gifts: null }, loaded = false, loading = false, ready = !!window.__nwReady;
@@ -1797,6 +1840,7 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
     parseDetail(fu.text, pe.text, gi.text);
     log = parseLog(lg.text);
     if (migrateUtilities()) needsSave = true;
+    if (migrateJointFixed()) needsSave = true;
     derive();
     baseline = takeBaseline();          // what's loaded isn't a "change"; only edits from here on are logged
     loaded = true;
@@ -1878,6 +1922,15 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
   const KEEP_ZERO_GROUPS = new Set(["Utilities"]);
   const keepZero = i => !!i.group && KEEP_ZERO_GROUPS.has(i.group);
   let needsSave = false;
+
+  // One time: Electric and Gas vary month to month and are paid separately, so they leave the joint account list.
+  // (Switch any line back with More options > Paid from joint account.)
+  function migrateJointFixed() {
+    if (settings.joint_fixed_v1) return false;
+    items.forEach(i => { if (i.group === "Utilities" && /^(electric|gas)$/i.test(String(i.name).trim())) i.joint = false; });
+    settings.joint_fixed_v1 = 1;
+    return true;
+  }
 
   // One time: turn the single "Utilities (Gas, Electric, Water)" line into Electric, Gas, Water, and Trash
   function migrateUtilities() {
@@ -2201,6 +2254,7 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
           ${view === "household" && kyleAmt(i) && i.victoria ? `<div class="b-sub">You ${fmt.format(kyleAmt(i))} · Victoria ${fmt.format(i.victoria)}</div>` : ""}</div>
         <div class="joint-item-amt num">${fmt.format(mine(i))}</div></div>`).join("");
       jointHtml = `<section class="alloc"><p class="card-title">Pay into the joint account each month</p>
+        <p class="paste-note" style="margin-top:-4px">Fixed monthly bills only.</p>
         ${lines.map(([n, x]) => `<div class="joint-line"><span>${n}</span><span class="num">${fmt.format(x)}</span></div>`).join("")}
         <button class="joint-toggle" id="jointToggle" aria-expanded="${jointOpen}">${jointOpen ? "Hide" : "Show"} the ${listed.length} expense${listed.length === 1 ? "" : "s"} <span class="b-caret">${jointOpen ? "▲" : "▼"}</span></button>
         ${jointOpen ? `<div class="joint-list">${itemsHtml}</div>` : ""}</section>`;
@@ -2632,6 +2686,9 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
         <h2>Display</h2>
         <p class="set-note">Saved on this device only.</p>
         <div class="set-row"><span>Appearance</span>${seg("theme", P.get("theme", "system"), [["system", "Match phone"], ["light", "Light"], ["dark", "Dark"]])}</div>
+        <div class="set-row"><span>Navigation</span>${seg("nav", P.get("nav", "bottom"), [["bottom", "Bottom bar"], ["side", "Side strip"]])}
+          <p class="set-note" style="margin:6px 0 0">The side strip puts the tabs in the empty column beside the clock and Wi-Fi icons. Re-add the Home Screen icon once so the app can draw there. If the buttons land on the icons, tap Lower.</p>
+          <div class="seg" role="group" style="margin-top:8px"><button data-rail="-4">Higher</button><button data-rail="4">Lower</button></div></div>
         <div class="set-row"><span>Font</span>${seg("font", P.get("font", "aptos"), [["aptos", "Aptos"], ["system", "System"], ["inter", "Inter"], ["figtree", "Figtree"]])}</div>
         <div class="set-row"><span>Net worth opens to</span>${seg("nwView", P.get("nwView", "household"), [["household", "Household"], ["kyle", "Kyle"], ["victoria", "Victoria"]])}</div>
         <div class="set-row"><span>Budget opens to</span>${seg("budgetView", P.get("budgetView", "household"), [["household", "Household"], ["kyle", "Kyle"], ["victoria", "Victoria"]])}</div>
@@ -2703,10 +2760,15 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
       $s.querySelectorAll(`[data-pref="${k}"]`).forEach(x => x.setAttribute("aria-pressed", x === b));
       if (k === "theme") window.WL_APPLY_THEME();
       if (k === "font") window.WL_APPLY_FONT();
+      if (k === "nav") window.WL_APPLY_NAV();
       if (k === "nwView") window.NW.setView(v);
       if (k === "budgetView") window.BUDGET.setView(v);
       if (k === "range") window.NW.setRange(v);
       if (k === "autosync") { v === "auto" ? window.NWSYNC.request(500, true) : window.NWSYNC.emit(); }
+    });
+    $s.querySelectorAll("[data-rail]").forEach(b => b.onclick = () => {
+      const v = Math.max(10, Math.min(75, (parseFloat(P.get("railTop", "42")) || 42) + Number(b.dataset.rail)));
+      P.set("railTop", String(v)); window.WL_APPLY_NAV();
     });
     document.getElementById("sSync").onclick = () => window.NWSYNC.syncOrSignIn();
     document.getElementById("sReset").onclick = () => {
