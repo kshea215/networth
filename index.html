@@ -1751,7 +1751,7 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
   ];
   const VIEWS = [["household", "Household"], ["kyle", "Kyle"], ["victoria", "Victoria"]];
   const DEFAULT_SETTINGS = { kyle_gross: 0, victoria_gross: 0, kyle_net: 0, victoria_net: 0, kyle_own_insurance: 50, paychecks_per_month: 2,
-    home_price: 470000, down_pct: 20, loan_rate: 7, loan_years: 30, joint_fixed_v1: 0, wireless_split_v1: 0 };
+    home_price: 470000, down_pct: 20, loan_rate: 7, loan_years: 30, joint_fixed_v1: 0, wireless_split_v1: 0, mortgage_group_v1: 0 };
   let items = [], settings = { ...DEFAULT_SETTINGS };
   let funds = [], pets = [], gifts = [];
   let etag = { items: null, settings: null, funds: null, pets: null, gifts: null }, loaded = false, loading = false, ready = !!window.__nwReady;
@@ -1767,7 +1767,7 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
   const SPLIT_BY_INCOME = ["mortgage/rent", "property taxes", "homeowners insurance", "hoa", "utilities (gas, electric, water)", "verizon fios"];
   const autoSplit = name => (SPLIT_BY_INCOME.includes(String(name).trim().toLowerCase()) ? "income" : "fixed");
   // Budget lines that add up from a detailed list
-  const autoSource = name => ({ "deferred savings": "deferred", "joint deferred": "deferred-joint", "pets": "pets", "gift savings": "gifts", "mortgage/rent": "mortgage" })[String(name).trim().toLowerCase()] || "";
+  const autoSource = name => ({ "deferred savings": "deferred", "joint deferred": "deferred-joint", "pets": "pets", "gift savings": "gifts", "mortgage/rent": "mortgage", "principal & interest": "mortgage" })[String(name).trim().toLowerCase()] || "";
   let view = WL_PREF.get("budgetView", "household"), openGroups = new Set(), openId = null, chain = Promise.resolve();
   let jointOpen = false;
   let log = [], baseline = { items: new Map(), settings: {} }, changeNote = "", logOpen = false, logShown = 40;
@@ -1840,6 +1840,7 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
     if (migrateUtilities()) needsSave = true;
     if (migrateJointFixed()) needsSave = true;
     if (migrateWirelessSplit()) needsSave = true;
+    if (migrateMortgageGroup()) needsSave = true;
     derive();
     baseline = takeBaseline();          // what's loaded isn't a "change"; only edits from here on are logged
     loaded = true;
@@ -1921,6 +1922,21 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
   const KEEP_ZERO_GROUPS = new Set(["Utilities"]);
   const keepZero = i => !!i.group && KEEP_ZERO_GROUPS.has(i.group);
   let needsSave = false;
+
+  // One time: principal and interest plus the escrow items (taxes, homeowners insurance) go into one "Mortgage Expenses" dropdown.
+  // HOA is paid to the association, not through escrow, so it stays on its own.
+  function migrateMortgageGroup() {
+    if (settings.mortgage_group_v1) return false;
+    settings.mortgage_group_v1 = 1;
+    let moved = false;
+    items.forEach(i => {
+      const n = String(i.name).trim().toLowerCase();
+      if (i.group) return;
+      if (n === "mortgage/rent") { i.name = "Principal & Interest"; i.source = "mortgage"; i.group = "Mortgage Expenses"; moved = true; }
+      else if (n === "property taxes" || n === "homeowners insurance") { i.group = "Mortgage Expenses"; moved = true; }
+    });
+    return true;
+  }
 
   // One time: the shared "Total Wireless" line becomes two lines, Kyle's ($25) and Victoria's ($30).
   // Neither is paid from the joint account (hers is reimbursed by Venmo).
@@ -2686,7 +2702,7 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
       </section>
       <section class="set-section">
         <h2>Home loan</h2>
-        <p class="set-note">Your monthly principal and interest comes from these, and it fills in the Mortgage/Rent line in your budget.</p>
+        <p class="set-note">Your monthly principal and interest comes from these, and it fills in the Principal & Interest line under Mortgage Expenses in your budget.</p>
         ${field("sHp", "Purchase price", st.home_price ? String(st.home_price) : "")}
         ${field("sDp", "Down payment (%)", String(st.down_pct))}
         ${field("sLr", "Interest rate (%)", Number(st.loan_rate).toFixed(3))}
