@@ -1751,7 +1751,7 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
   ];
   const VIEWS = [["household", "Household"], ["kyle", "Kyle"], ["victoria", "Victoria"]];
   const DEFAULT_SETTINGS = { kyle_gross: 0, victoria_gross: 0, kyle_net: 0, victoria_net: 0, kyle_own_insurance: 50, paychecks_per_month: 2,
-    home_price: 470000, down_pct: 20, loan_rate: 7, loan_years: 30, joint_fixed_v1: 0 };
+    home_price: 470000, down_pct: 20, loan_rate: 7, loan_years: 30, joint_fixed_v1: 0, wireless_split_v1: 0 };
   let items = [], settings = { ...DEFAULT_SETTINGS };
   let funds = [], pets = [], gifts = [];
   let etag = { items: null, settings: null, funds: null, pets: null, gifts: null }, loaded = false, loading = false, ready = !!window.__nwReady;
@@ -1839,6 +1839,7 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
     log = parseLog(lg.text);
     if (migrateUtilities()) needsSave = true;
     if (migrateJointFixed()) needsSave = true;
+    if (migrateWirelessSplit()) needsSave = true;
     derive();
     baseline = takeBaseline();          // what's loaded isn't a "change"; only edits from here on are logged
     loaded = true;
@@ -1920,6 +1921,20 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
   const KEEP_ZERO_GROUPS = new Set(["Utilities"]);
   const keepZero = i => !!i.group && KEEP_ZERO_GROUPS.has(i.group);
   let needsSave = false;
+
+  // One time: the shared "Total Wireless" line becomes two lines, Kyle's ($25) and Victoria's ($30).
+  // Neither is paid from the joint account (hers is reimbursed by Venmo).
+  function migrateWirelessSplit() {
+    if (settings.wireless_split_v1) return false;
+    settings.wireless_split_v1 = 1;
+    const idx = items.findIndex(i => /^total wireless$/i.test(String(i.name).trim()));
+    if (idx < 0) return true;                                  // nothing to split; just remember it ran
+    const old = items[idx];
+    const mk = (name, k, v, note) => ({ id: newId(), name, section: old.section, group: "", kyle_p1: k, kyle_p2: 0, victoria: v,
+      joint: false, method: old.method, note, source: "", split: "fixed" });
+    items.splice(idx, 1, mk("Total Wireless (Kyle)", 25, 0, ""), mk("Total Wireless (Victoria)", 0, 30, "Victoria reimburses this by Venmo with the monthly utility request."));
+    return true;
+  }
 
   // One time: Electric and Gas vary month to month and are paid separately, so they leave the joint account list.
   // (Switch any line back with More options > Paid from joint account.)
