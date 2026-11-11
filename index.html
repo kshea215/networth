@@ -186,6 +186,13 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
 .log-latest { text-align: right; flex-shrink: 0; font-weight: 700; }
 .log-latest .b-sub { font-weight: 500; }
 
+/* Export as an image */
+.export-link { display: block; width: 100%; margin: -6px 0 18px; text-align: center; font-size: 14px; }
+.export-prev { margin: 12px 0; min-height: 120px; }
+.export-prev img { display: block; width: 100%; height: auto; border-radius: 18px; box-shadow: 0 8px 28px rgba(0, 0, 0, 0.28); }
+.export-actions { display: flex; gap: 10px; margin-top: 4px; }
+.export-actions button { flex: 1; margin: 0; }
+
 /* Paste balances */
 .paste-link { display: block; width: 100%; margin: -14px 0 18px; text-align: center; font-size: 14px; }
 .paste-box { width: 100%; box-sizing: border-box; font: inherit; font-size: 15px; line-height: 1.4; color: var(--text); background: var(--surface-2); border: 0; border-radius: 14px; padding: 12px; resize: vertical; margin-bottom: 12px; }
@@ -1049,6 +1056,7 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
       <div class="bars-wrap" id="barsWrap"></div>
       <button class="primary" id="updateBtn" ${active.length ? "" : "disabled"}>Update balances</button>
       <button class="text-btn paste-link" id="pasteBtn" ${active.length ? "" : "disabled"}>Paste a list of balances instead</button>
+      <button class="text-btn export-link" id="exportImgBtn" ${active.length ? "" : "disabled"}>Export as an image</button>
       ${dateBarHtml()}
       ${allocHtml}
       </div><div class="col col-b">
@@ -1069,6 +1077,7 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
     $app.querySelectorAll("[data-view]").forEach(b => b.onclick = () => { view = b.dataset.view; openAcct = null; render(); });
     document.getElementById("updateBtn").onclick = openUpdate;
     document.getElementById("pasteBtn").onclick = openPaste;
+    document.getElementById("exportImgBtn").onclick = () => openExport("nw", view);
     bindDateBar($app);
     document.getElementById("manageBtn").onclick = openManage;
     document.getElementById("exportBtn").onclick = exportCSV;
@@ -1501,6 +1510,252 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
     input();
   }
 
+  // ---------- export as a compact image ----------
+  const EXF = '-apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", Inter, Roboto, "Helvetica Neue", Arial, sans-serif';
+  const EX = { text: "#F5F5F7", muted: "#8E8E93", up: "#30D158", down: "#FF453A", line: "rgba(255,255,255,0.10)", card: "rgba(255,255,255,0.07)" };
+  const exMoney = (n, dec = 0) => (n < 0 ? "−" : "") + "$" + Math.abs(n).toLocaleString("en-US", { minimumFractionDigits: dec, maximumFractionDigits: dec });
+  const exSigned = n => (n < 0 ? "−" : "+") + "$" + Math.abs(Math.round(n)).toLocaleString("en-US");
+  const exLong = iso => { const [y, m, d] = iso.split("-").map(Number); return new Date(y, m - 1, d).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }); };
+  const exAlpha = (hex, a) => { const n = parseInt(hex.slice(1), 16); return `rgba(${n >> 16 & 255},${n >> 8 & 255},${n & 255},${a})`; };
+  function exRR(ctx, x, y, w, h, r) {
+    ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath();
+  }
+  function exText(ctx, t, x, y, font, color, align) {
+    ctx.font = font; ctx.fillStyle = color; ctx.textAlign = align || "left"; ctx.textBaseline = "alphabetic"; ctx.fillText(t, x, y);
+  }
+  function exFit(ctx, t, maxW) {
+    if (ctx.measureText(t).width <= maxW) return t;
+    let c = t; while (c.length > 1 && ctx.measureText(c + "…").width > maxW) c = c.slice(0, -1); return c + "…";
+  }
+  function exHeader(ctx, W, P, label, viewName) {
+    exText(ctx, label, P, 44, `700 13px ${EXF}`, EX.muted);
+    const lw = ctx.measureText(label).width;
+    ctx.font = `700 12px ${EXF}`;
+    const cw = ctx.measureText(viewName).width + 22, cx = P + lw + 12;
+    exRR(ctx, cx, 28, cw, 23, 11.5); ctx.fillStyle = "rgba(255,255,255,0.13)"; ctx.fill();
+    exText(ctx, viewName, cx + cw / 2, 44, `700 12px ${EXF}`, EX.text, "center");
+    exText(ctx, "Worthwhile", W - P, 44, `700 13px ${EXF}`, "rgba(255,255,255,0.5)", "right");
+  }
+  function exBar(ctx, x, y, w, h, parts) {            // parts: [{ amount, color }]
+    const total = parts.reduce((t, p) => t + p.amount, 0) || 1;
+    ctx.save(); exRR(ctx, x, y, w, h, h / 2); ctx.clip();
+    let cx = x;
+    parts.forEach((p, i) => { const pw = (p.amount / total) * w; ctx.fillStyle = p.color; ctx.fillRect(cx, y, Math.max(pw - (i < parts.length - 1 ? 2 : 0), 1), h); cx += pw; });
+    ctx.restore();
+  }
+  function exFooter(ctx, W, P, y, left) {
+    ctx.fillStyle = EX.line; ctx.fillRect(P, y, W - P * 2, 1);
+    exText(ctx, left, P, y + 24, `500 12px ${EXF}`, EX.muted);
+    return y + 46;
+  }
+
+  function exPaintNW(ctx, W, d) {
+    const P = 30, inner = W - P * 2;
+    exHeader(ctx, W, P, "NET WORTH", d.viewName);
+    exText(ctx, exMoney(d.nw), P, 118, `800 58px ${EXF}`, EX.text);
+    let y = 150;
+    if (d.change != null) {
+      const a = exSigned(d.change);
+      exText(ctx, a, P, y, `700 17px ${EXF}`, d.change >= 0 ? EX.up : EX.down);
+      const w = ctx.measureText(a).width;
+      exText(ctx, "  since " + d.prevLabel, P + w, y, `500 17px ${EXF}`, EX.muted);
+    } else exText(ctx, "First entry " + d.dateLabel, P, y, `500 17px ${EXF}`, EX.muted);
+    y += 30;
+
+    if (d.points.length > 1) {                           // the trend line
+      const top = y, h = 92, pts = d.points, vs = pts.map(p => p.v);
+      const mn = Math.min(...vs), mx = Math.max(...vs), span = mx - mn || 1, t0 = pts[0].t, ts = (pts[pts.length - 1].t - t0) || 1;
+      const X = p => P + ((p.t - t0) / ts) * inner, Y = p => top + 8 + (1 - (p.v - mn) / span) * (h - 16);
+      const col = vs[vs.length - 1] >= vs[0] ? EX.up : EX.down;
+      ctx.beginPath(); pts.forEach((p, i) => (i ? ctx.lineTo(X(p), Y(p)) : ctx.moveTo(X(p), Y(p))));
+      ctx.lineWidth = 3; ctx.lineJoin = "round"; ctx.lineCap = "round"; ctx.strokeStyle = col; ctx.stroke();
+      ctx.lineTo(P + inner, top + h); ctx.lineTo(P, top + h); ctx.closePath();
+      const g = ctx.createLinearGradient(0, top, 0, top + h); g.addColorStop(0, exAlpha(col, 0.30)); g.addColorStop(1, exAlpha(col, 0));
+      ctx.fillStyle = g; ctx.fill();
+      const lp = pts[pts.length - 1];
+      ctx.beginPath(); ctx.arc(X(lp), Y(lp), 5, 0, Math.PI * 2); ctx.fillStyle = col; ctx.fill();
+      ctx.beginPath(); ctx.arc(X(lp), Y(lp), 8.5, 0, Math.PI * 2); ctx.strokeStyle = exAlpha(col, 0.35); ctx.lineWidth = 2; ctx.stroke();
+      const mo = t => new Date(t).toLocaleDateString("en-US", { month: "short", year: "numeric" });
+      exText(ctx, mo(pts[0].t), P, top + h + 20, `500 12px ${EXF}`, EX.muted);
+      exText(ctx, mo(lp.t), W - P, top + h + 20, `500 12px ${EXF}`, EX.muted, "right");
+      y = top + h + 52;
+    }
+
+    if (d.cats.length) {                                 // where the money sits
+      const total = d.cats.reduce((t, c) => t + c.amount, 0);
+      exText(ctx, "WHERE IT SITS", P, y, `700 12px ${EXF}`, EX.muted); y += 14;
+      exBar(ctx, P, y, inner, 14, d.cats); y += 14 + 28;
+      d.cats.forEach(c => {
+        ctx.beginPath(); ctx.arc(P + 5, y - 5, 5, 0, Math.PI * 2); ctx.fillStyle = c.color; ctx.fill();
+        exText(ctx, c.name, P + 20, y, `500 15px ${EXF}`, EX.text);
+        exText(ctx, exMoney(c.amount), W - P, y, `700 15px ${EXF}`, EX.text, "right");
+        const pc = (c.amount / total) * 100;
+        exText(ctx, pc < 1 ? "<1%" : Math.round(pc) + "%", W - P - 98, y, `500 13px ${EXF}`, EX.muted, "right");
+        y += 27;
+      });
+    }
+    if (d.debts > 0.5 || d.equity) {
+      y += 2; ctx.fillStyle = EX.line; ctx.fillRect(P, y - 12, inner, 1); y += 12;
+      if (d.debts > 0.5) { exText(ctx, "Debts", P, y, `500 15px ${EXF}`, EX.muted); exText(ctx, "−" + exMoney(d.debts), W - P, y, `700 15px ${EXF}`, EX.down, "right"); y += 27; }
+      if (d.equity) { exText(ctx, `Home equity (${d.equity.pct}%)`, P, y, `500 15px ${EXF}`, EX.muted); exText(ctx, exMoney(d.equity.value), W - P, y, `700 15px ${EXF}`, EX.text, "right"); y += 27; }
+    }
+    return exFooter(ctx, W, P, y - 4, "As of " + d.dateLabel);
+  }
+
+  function exPaintBudget(ctx, W, d) {
+    const P = 30, inner = W - P * 2;
+    exHeader(ctx, W, P, "BUDGET", d.viewName);
+    exText(ctx, "Monthly take-home", P, 84, `600 14px ${EXF}`, EX.muted);
+    exText(ctx, exMoney(d.takeHome), P, 134, `800 54px ${EXF}`, EX.text);
+    let y = 164;
+    const b = "Budgeted " + exMoney(d.budgeted, 2);
+    exText(ctx, b, P, y, `500 15px ${EXF}`, EX.muted);
+    const bw = ctx.measureText(b).width;
+    const rem = Math.abs(d.remaining) < 0.01 ? ["every dollar assigned", EX.up] : d.remaining > 0 ? [exMoney(d.remaining, 2) + " unassigned", EX.up] : [exMoney(-d.remaining, 2) + " over income", EX.down];
+    exText(ctx, "  ·  " + rem[0], P + bw, y, `700 15px ${EXF}`, rem[1]);
+    y += 24;
+    exText(ctx, "Savings rate", P, y, `500 15px ${EXF}`, EX.muted);
+    exText(ctx, (d.rate * 100).toFixed(1) + "%", P + ctx.measureText("Savings rate ").width + 4, y, `700 15px ${EXF}`, EX.text);
+    y += 24;
+
+    exBar(ctx, P, y, inner, 14, d.sections.map(s => ({ amount: s.total, color: s.color }))); y += 14 + 24;
+    const colW = inner / 3;                              // legend under the bar: name and share of income
+    d.sections.forEach((s, i) => {
+      const x = P + colW * i, pc = (d.takeHome ? Math.round((s.total / d.takeHome) * 100) : 0) + "%";
+      ctx.beginPath(); ctx.arc(x + 5, y - 5, 4.5, 0, Math.PI * 2); ctx.fillStyle = s.color; ctx.fill();
+      exText(ctx, s.name, x + 16, y, `600 13px ${EXF}`, EX.muted);
+      exText(ctx, pc, x + 16 + ctx.measureText(s.name + " ").width + 2, y, `800 13px ${EXF}`, EX.text);
+    });
+    y += 38;
+
+    const MAX = { necessity: 7, discretionary: 4, savings: 6 };
+    d.sections.forEach(s => {
+      if (!s.rows.length) return;
+      ctx.fillStyle = EX.line; ctx.fillRect(P, y - 12, inner, 1); y += 10;
+      ctx.beginPath(); ctx.arc(P + 5, y - 5, 5, 0, Math.PI * 2); ctx.fillStyle = s.color; ctx.fill();
+      exText(ctx, s.name, P + 20, y, `700 15px ${EXF}`, EX.text);
+      exText(ctx, exMoney(s.total, 2), W - P, y, `700 15px ${EXF}`, EX.text, "right");
+      y += 24;
+      const max = MAX[s.id] || 6;
+      const shown = s.rows.length > max ? s.rows.slice(0, max - 1) : s.rows;
+      const rest = s.rows.length > max ? s.rows.slice(max - 1) : [];
+      shown.forEach(r => {
+        ctx.font = `500 14px ${EXF}`;
+        exText(ctx, exFit(ctx, r.name, inner - 120), P + 20, y, `500 14px ${EXF}`, "rgba(245,245,247,0.82)");
+        exText(ctx, exMoney(r.amount, 2), W - P, y, `500 14px ${EXF}`, "rgba(245,245,247,0.82)", "right");
+        y += 21;
+      });
+      if (rest.length) {
+        exText(ctx, `+${rest.length} more`, P + 20, y, `500 14px ${EXF}`, EX.muted);
+        exText(ctx, exMoney(rest.reduce((t, r) => t + r.amount, 0), 2), W - P, y, `500 14px ${EXF}`, EX.muted, "right");
+        y += 21;
+      }
+      y += 14;
+    });
+
+    if (d.joint.has) {                                   // what goes into the joint account
+      y -= 2;
+      exRR(ctx, P, y, inner, 78, 16); ctx.fillStyle = EX.card; ctx.fill();
+      exText(ctx, "INTO THE JOINT ACCOUNT EACH MONTH", P + 18, y + 26, `700 11px ${EXF}`, EX.muted);
+      const cells = d.view === "household" ? [["Kyle", d.joint.k], ["Victoria", d.joint.v], ["Total", d.joint.k + d.joint.v]]
+        : d.view === "kyle" ? [["Kyle", d.joint.k]] : [["Victoria", d.joint.v]];
+      const cw = (inner - 36) / cells.length;
+      cells.forEach(([n, v], i) => {
+        exText(ctx, n, P + 18 + cw * i, y + 46, `500 12px ${EXF}`, EX.muted);
+        exText(ctx, exMoney(v, 2), P + 18 + cw * i, y + 66, `800 17px ${EXF}`, EX.text);
+      });
+      y += 78 + 22;
+    }
+    return exFooter(ctx, W, P, y, exLong(todayISO()));
+  }
+
+  function exRender(kind, data, scale) {
+    const W = 540, sc = scale || 2;
+    const H = Math.ceil((kind === "nw" ? exPaintNW : exPaintBudget)(document.createElement("canvas").getContext("2d"), W, data));
+    const c = document.createElement("canvas"); c.width = W * sc; c.height = H * sc;
+    const ctx = c.getContext("2d"); ctx.scale(sc, sc);
+    const accent = kind === "nw" ? (data.change != null && data.change < 0 ? EX.down : EX.up) : "#64D2FF";
+    const bg = ctx.createLinearGradient(0, 0, 0, H); bg.addColorStop(0, "#0A0A0F"); bg.addColorStop(1, "#16161E");
+    ctx.fillStyle = bg; ctx.fillRect(0, 0, W, H);
+    const glow = ctx.createRadialGradient(W * 0.9, 0, 0, W * 0.9, 0, W * 0.9); glow.addColorStop(0, exAlpha(accent, 0.22)); glow.addColorStop(1, exAlpha(accent, 0));
+    ctx.fillStyle = glow; ctx.fillRect(0, 0, W, H);
+    (kind === "nw" ? exPaintNW : exPaintBudget)(ctx, W, data);
+    return c;
+  }
+
+  // The numbers behind a net worth image, for whichever view
+  function nwExportData(v) {
+    const keep = view; view = v;
+    try {
+      const sr = series();
+      if (!sr.length) return null;
+      const last = sr[sr.length - 1], prev = sr.length > 1 ? sr[sr.length - 2] : null, bal = last.balances;
+      const accts = state.accounts.filter(inView);
+      const cats = CATEGORIES.filter(c => c.kind === "asset")
+        .map(c => ({ name: c.name, color: c.color, amount: accts.filter(a => a.kind === "asset" && catOf(a) === c.id).reduce((t, a) => t + (bal[a.id] || 0), 0) }))
+        .filter(c => c.amount > 0.5).sort((a, b) => b.amount - a.amount);
+      const find = (n, k) => accts.find(a => !a.archived && a.kind === k && a.name.trim().toLowerCase() === n);
+      const home = find("home", "asset"), mort = find("mortgage", "liability");
+      const equity = home && mort && bal[home.id] != null && bal[mort.id] != null
+        ? { value: bal[home.id] - bal[mort.id], pct: bal[home.id] ? Math.round(((bal[home.id] - bal[mort.id]) / bal[home.id]) * 100) : 0 } : null;
+      const tOf = p => Date.parse(p.date + "T00:00:00");
+      let pts = sr.filter(p => tOf(p) >= tOf(last) - 366 * 864e5);
+      if (pts.length < 2) pts = sr.slice(-12);
+      return { view: v, viewName: OWNERS.find(o => o[0] === v)[1], nw: last.nw, assets: last.assets, debts: last.liabilities,
+        change: prev ? last.nw - prev.nw : null, prevLabel: prev ? shortDate(prev.date) : "", dateLabel: exLong(last.date), cats, equity,
+        points: pts.map(p => ({ t: tOf(p), v: p.nw })) };
+    } finally { view = keep; }
+  }
+
+  // Preview sheet: pick Household / Kyle / Victoria, then share or save
+  function openExport(kind, startView) {
+    let v = startView || "household", blob = null, url = null, seq = 0;
+    const label = kind === "nw" ? "Net worth" : "Budget";
+    const canShare = !!(navigator.share && navigator.canShare);
+    const fileName = () => `Worthwhile-${kind === "nw" ? "net-worth" : "budget"}-${v}-${todayISO()}.png`;
+    const build = async () => {
+      const mine = ++seq, box = document.getElementById("exPrev");
+      if (!box) return;
+      box.innerHTML = `<p class="paste-note">Making your image…</p>`;
+      const data = kind === "nw" ? nwExportData(v) : window.BUDGET.exportData(v);
+      if (!data) { blob = null; box.innerHTML = `<p class="paste-note">Nothing to export for this view yet.</p>`; return; }
+      try { if (document.fonts && document.fonts.ready) await document.fonts.ready; } catch (e) {}
+      const canvas = exRender(kind, data, 2);
+      const b = await new Promise(res => canvas.toBlob(res, "image/png"));
+      if (mine !== seq || !document.getElementById("exPrev")) return;
+      if (url) URL.revokeObjectURL(url);
+      blob = b; url = URL.createObjectURL(b);
+      box.innerHTML = `<img id="exImg" alt="${label} image preview" src="${url}" width="${canvas.width}" height="${canvas.height}">`;
+    };
+    openSheet(`
+      <div class="sheet-top"><h2>Export image</h2><button class="text-btn" id="exClose">Done</button></div>
+      <div class="seg" role="group" aria-label="Whose ${label.toLowerCase()}">${OWNERS.map(([id, name]) => `<button data-exv="${id}" aria-pressed="${id === v}">${name}</button>`).join("")}</div>
+      <div class="export-prev" id="exPrev"></div>
+      <div class="export-actions">${canShare ? `<button class="primary" id="exShare">Share or save…</button>` : ""}<button class="secondary" id="exSave">Download PNG</button></div>
+      <p class="paste-note" style="margin-top:10px">You can also press and hold the image to save it to Photos.</p>`);
+    document.getElementById("exClose").onclick = () => { if (url) URL.revokeObjectURL(url); closeSheet(); };
+    document.getElementById("sheet").querySelectorAll("[data-exv]").forEach(btn => btn.onclick = () => {
+      v = btn.dataset.exv;
+      document.getElementById("sheet").querySelectorAll("[data-exv]").forEach(x => x.setAttribute("aria-pressed", String(x === btn)));
+      build();
+    });
+    const sh = document.getElementById("exShare");
+    if (sh) sh.onclick = async () => {
+      if (!blob) return;
+      const file = new File([blob], fileName(), { type: "image/png" });
+      try {
+        if (navigator.canShare({ files: [file] })) await navigator.share({ files: [file], title: `Worthwhile ${label.toLowerCase()}` });
+        else toast("Press and hold the image to save it");
+      } catch (e) { if (e && e.name !== "AbortError") toast("Couldn’t open the share sheet"); }
+    };
+    document.getElementById("exSave").onclick = () => {
+      if (!blob) return;
+      const a = document.createElement("a"); a.href = url; a.download = fileName(); document.body.appendChild(a); a.click(); a.remove();
+    };
+    build();
+  }
+
   // Manage accounts
   function openManage() {
     const active = state.accounts.filter(a => !a.archived).sort((a, b) => catOrder(a) - catOrder(b));
@@ -1663,7 +1918,7 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
     if (i) i.onchange = e => setChangeDate(e.target.value || null);
     if (t) t.onclick = () => setChangeDate(null);
   }
-  window.NWUI = { bindMini, changeDate, setChangeDate, dateBarHtml, bindDateBar, todayISO };
+  window.NWUI = { bindMini, changeDate, setChangeDate, dateBarHtml, bindDateBar, todayISO, openExport: (kind, v) => openExport(kind, v) };
 
   // Shared with the Budget tab
   window.NW = { readFile, writeFile, parseCSV, toCSV, toast, openSheet, closeSheet, esc,
@@ -1804,6 +2059,28 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
       if (!loaded) await (loading && loadPromise ? loadPromise : load());
     },
     get: () => ({ ...settings }),
+    // The numbers behind a budget image, for whichever view (groups are rolled up to one line each)
+    exportData(v) {
+      if (!loaded || !items.length) return null;
+      const keep = view; view = v;
+      try {
+        const inc = income();
+        const live = items.filter(i => amt(i) > 0.004);
+        const sections = SECTIONS.map(sec => {
+          const list = live.filter(i => i.section === sec.id), byGroup = new Map(), rows = [];
+          list.forEach(i => {
+            if (i.group) { if (!byGroup.has(i.group)) { const r = { name: i.group, amount: 0 }; byGroup.set(i.group, r); rows.push(r); } byGroup.get(i.group).amount += amt(i); }
+            else rows.push({ name: i.name, amount: amt(i) });
+          });
+          rows.sort((a, b) => b.amount - a.amount);
+          return { id: sec.id, name: sec.name, color: sec.color, total: list.reduce((t, i) => t + amt(i), 0), rows };
+        });
+        const budgeted = sections.reduce((t, x) => t + x.total, 0), joint = live.filter(i => i.joint);
+        return { view: v, viewName: VIEWS.find(x => x[0] === v)[1], takeHome: inc, budgeted, remaining: Math.round((inc - budgeted) * 100) / 100,
+          rate: inc ? sections.find(x => x.id === "savings").total / inc : 0, sections,
+          joint: { has: joint.length > 0, k: joint.reduce((t, i) => t + kyleAmt(i), 0), v: joint.reduce((t, i) => t + i.victoria, 0) } };
+      } finally { view = keep; }
+    },
     shareFor: (kyleNet, ins, perMonth, vicNet) => { const k = kyleNet + ins * perMonth, t = k + vicNet; return t > 0 ? k / t : 0.5; },
     async update(patch, note) { Object.assign(settings, patch); loaded = true; derive(); render(); changeNote = note || "Take-home or split changed"; await save(); },
     loanMath: (price, down, rate, years) => loanMath(price, down, rate, years),
@@ -2342,7 +2619,8 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
       <div class="footer">
         <button class="secondary" id="bAdd">Add item</button>
         <button class="secondary" id="bIncome">Income</button>
-      </div></div></div>`;
+      </div>
+      <button class="text-btn export-link" id="bExport" style="margin-top:14px">Export as an image</button></div></div>`;
 
     $b.querySelectorAll("[data-bview]").forEach(btn => btn.onclick = () => { view = btn.dataset.bview; render(); });
     $b.querySelectorAll("[data-group]").forEach(r => {
@@ -2381,6 +2659,7 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
     });
     const jt = document.getElementById("jointToggle");
     if (jt) jt.onclick = () => { jointOpen = !jointOpen; render(); };
+    document.getElementById("bExport").onclick = () => window.NWUI.openExport("budget", view);
     document.getElementById("bAdd").onclick = () => openItem(null);
     document.getElementById("bIncome").onclick = openIncome;
     $b.querySelectorAll("[data-amt]").forEach(btn => { btn.onclick = e => { e.stopPropagation(); startInline(btn, "item"); }; btn.onkeydown = e => e.stopPropagation(); });
