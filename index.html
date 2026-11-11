@@ -192,7 +192,7 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
 /* Gifts: check circles and what's been bought */
 .gift-line { display: flex; align-items: center; gap: 10px; }
 .gift-name { min-width: 0; }
-.gift-name .b-sub { display: block; font-weight: 500; }
+.gift-name .b-sub { display: block; font-weight: 500; min-height: 1.3em; line-height: 1.3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }   /* always takes its line, so ticking never changes a row's height */
 .gift-name.done { color: var(--muted); }
 .gift-check { flex-shrink: 0; width: 24px; height: 24px; border-radius: 50%; border: 2px solid var(--muted); background: transparent; color: #fff; font-size: 14px; font-weight: 800; line-height: 1; padding: 0; display: inline-flex; align-items: center; justify-content: center; -webkit-tap-highlight-color: transparent; }
 .gift-check.all { background: var(--up); border-color: var(--up); }
@@ -1006,10 +1006,11 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
 
   // ---------- rendering ----------
   function render() {                                    // redraw, but keep the pinned left column where it was scrolled to
-    const ca = $app.querySelector(".col-a"), keep = ca ? ca.scrollTop : 0;
+    const ca = $app.querySelector(".col-a"), keep = ca ? ca.scrollTop : 0, keepY = window.scrollY;
     renderCore();
     const na = $app.querySelector(".col-a");
     if (na && keep) na.scrollTop = keep;
+    holdScroll(keepY);
   }
   function renderCore() {
     if (!loaded) return;
@@ -2047,6 +2048,29 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
     if (i) i.onchange = e => setChangeDate(e.target.value || null);
     if (t) t.onclick = () => setChangeDate(null);
   }
+  // After a redraw, keep the page at the scroll position it had. Some phones reset it to the top when the list is rebuilt,
+  // so for a moment after each redraw we put it back, unless you've started scrolling yourself.
+  const scrollHold = { y: 0, until: 0, touched: false, running: false };
+  function holdScroll(y) {
+    if (y < 40) return;
+    scrollHold.y = y; scrollHold.until = performance.now() + 700; scrollHold.touched = false;
+    window.scrollTo(0, y);
+    if (scrollHold.running) return;
+    scrollHold.running = true;
+    const mark = () => { scrollHold.touched = true; };
+    window.addEventListener("touchstart", mark, { passive: true });
+    window.addEventListener("wheel", mark, { passive: true });
+    const step = () => {
+      if (scrollHold.touched || performance.now() > scrollHold.until) {
+        window.removeEventListener("touchstart", mark); window.removeEventListener("wheel", mark); scrollHold.running = false; return;
+      }
+      if (Math.abs(window.scrollY - scrollHold.y) > 2) window.scrollTo(0, scrollHold.y);
+      requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
+  }
+  const retargetHold = () => { if (scrollHold.running) scrollHold.y = window.scrollY; };
+
   // Redraw after an expand/collapse without the screen shifting under your finger: the row you tapped stays where it was,
   // even when another row above it closes at the same moment. Nothing else scrolls on its own.
   function anchorRender(el, redraw, findAgain) {
@@ -2056,8 +2080,9 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
     if (!now) return;
     const sc = now.closest(".col-a"), shift = d => { if (Math.abs(d) < 1) return; if (sc) sc.scrollTop += d; else window.scrollBy(0, d); };
     shift(now.getBoundingClientRect().top - before);
+    retargetHold();
   }
-  window.NWUI = { anchorRender, bindMini, changeDate, setChangeDate, dateBarHtml, bindDateBar, todayISO, openExport: (kind, v) => openExport(kind, v), nwExportData };
+  window.NWUI = { anchorRender, holdScroll, bindMini, changeDate, setChangeDate, dateBarHtml, bindDateBar, todayISO, openExport: (kind, v) => openExport(kind, v), nwExportData };
 
   // Shared with the Budget tab
   window.NW = { readFile, writeFile, parseCSV, toCSV, toast, openSheet, closeSheet, esc,
@@ -2537,6 +2562,30 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
     const done = occ.filter(o => set.has(`${o.id}-${yr}`));
     return { total: occ.length, done: done.length, dollars: done.reduce((t, o) => t + o.amount, 0), all: occ.length > 0 && done.length === occ.length };
   }
+  const giftSummaryText = () => {
+    const sts = gifts.map(giftStatus), tot = sts.reduce((t, x) => t + x.total, 0), done = sts.reduce((t, x) => t + x.done, 0);
+    const planned = gifts.reduce((t, g) => t + giftOccasions(g).reduce((u, o) => u + o.amount, 0), 0), spent = sts.reduce((t, x) => t + x.dollars, 0);
+    return `Bought this year: <b>${done} of ${tot}</b> gifts · ${fmt0.format(spent)} of ${fmt0.format(planned)} planned`;
+  };
+  // Change just the parts of the screen that show this person's status, so nothing is rebuilt and nothing can move
+  function updateGiftDom(g) {
+    const st = giftStatus(g), state = st.total === 0 ? "none" : st.all ? "all" : st.done ? "some" : "none";
+    const btn = $b.querySelector(`[data-gcheck="${g.id}"]`);
+    if (btn) {
+      btn.className = "gift-check " + state;
+      btn.textContent = state === "all" ? "✓" : state === "some" ? "–" : "";
+      btn.setAttribute("aria-label", `${st.all ? "Clear" : "Mark"} all of ${g.name}’s gifts as bought`);
+      const nm = btn.parentElement.querySelector(".gift-name");
+      if (nm) { nm.classList.toggle("done", st.all); const sub = nm.querySelector(".b-sub"); if (sub) sub.textContent = st.all ? "all bought" : st.done ? `${st.done} of ${st.total}` : ""; }
+    }
+    const set = giftBoughtSet(g), yr = giftYr();
+    $b.querySelectorAll(`[data-gocc^="${g.id}:"]`).forEach(pill => {
+      const on = set.has(`${pill.dataset.gocc.split(":")[1]}-${yr}`);
+      pill.classList.toggle("on", on); pill.setAttribute("aria-pressed", String(on));
+      pill.textContent = (on ? "✓ " : "") + pill.textContent.replace(/^✓ /, "");
+    });
+    const sm = $b.querySelector(".gift-summary"); if (sm) sm.innerHTML = giftSummaryText();
+  }
   async function toggleGift(id, occasion) {
     const g = gifts.find(x => x.id === id);
     if (!g) return;
@@ -2545,7 +2594,7 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
     const allOn = keys.length > 0 && keys.every(k => set.has(k));
     keys.forEach(k => (allOn ? set.delete(k) : set.add(k)));
     g.bought = [...set].filter(k => k.endsWith("-" + yr)).join(";");     // old years drop away
-    render();
+    updateGiftDom(g);
     await save(["gifts"]);
   }
 
@@ -2569,7 +2618,7 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
     if (type === "gift") {                                // a check circle: tap to mark everything for this person bought
       const st = giftStatus(o), state = st.total === 0 ? "none" : st.all ? "all" : st.done ? "some" : "none";
       nameHtml = `<button class="gift-check ${state}" data-gcheck="${o.id}" aria-label="${st.all ? "Clear" : "Mark"} all of ${esc(row.name)}’s gifts as bought" ${st.total ? "" : "disabled"}>${state === "all" ? "✓" : state === "some" ? "–" : ""}</button>`
-        + `<span class="gift-name${st.all ? " done" : ""}">${esc(row.name)}${st.total ? `<span class="b-sub">${st.all ? "all bought" : st.done ? `${st.done} of ${st.total} bought` : ""}</span>` : ""}</span>`;
+        + `<span class="gift-name${st.all ? " done" : ""}">${esc(row.name)}${st.total ? `<span class="b-sub">${st.all ? "all bought" : st.done ? `${st.done} of ${st.total}` : ""}</span>` : ""}</span>`;
     }
     let html = `<div class="b-row child${open ? " open" : ""}" data-toggle="${key}" role="button" tabindex="0" aria-expanded="${open}">
       <div class="b-name${type === "gift" ? " gift-line" : ""}">${nameHtml}</div>${amtHtml}</div>`;
@@ -2692,10 +2741,11 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
   }
 
   function render() {                                    // redraw, but keep the pinned left column where it was scrolled to
-    const ca = $b.querySelector(".col-a"), keep = ca ? ca.scrollTop : 0;
+    const ca = $b.querySelector(".col-a"), keep = ca ? ca.scrollTop : 0, keepY = window.scrollY;
     renderCore();
     const na = $b.querySelector(".col-a");
     if (na && keep) na.scrollTop = keep;
+    window.NWUI.holdScroll(keepY);
   }
   function renderCore() {
     if (!loaded) return;
@@ -2762,11 +2812,7 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
             <div class="b-name">${esc(i.name)}<span class="b-caret">${open ? "▲" : "▼"} ${dd.rows.length}</span></div>
             <div class="b-amt num">${fmt.format(amt(i))}</div></div>`);
           if (open) {
-            if (dd.type === "gift") {
-              const sts = gifts.map(giftStatus), tot = sts.reduce((t, x) => t + x.total, 0), done = sts.reduce((t, x) => t + x.done, 0);
-              const planned = gifts.reduce((t, g) => t + giftOccasions(g).reduce((u, o) => u + o.amount, 0), 0), spent = sts.reduce((t, x) => t + x.dollars, 0);
-              rows.push(`<div class="gift-summary">Bought this year: <b>${done} of ${tot}</b> gifts · ${fmt0.format(spent)} of ${fmt0.format(planned)} planned</div>`);
-            }
+            if (dd.type === "gift") rows.push(`<div class="gift-summary">${giftSummaryText()}</div>`);
             dd.rows.sort((a, b) => b.m - a.m).forEach(r => rows.push(childRow(dd.type, r)));
             rows.push(`<div class="b-row child add-row" data-add="${dd.type}" data-person="${dd.person || view}" role="button" tabindex="0"><div class="b-name">+ ${dd.add}</div></div>`);
           }
