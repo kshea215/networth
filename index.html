@@ -287,7 +287,8 @@ main { padding-bottom: calc(96px + env(safe-area-inset-bottom, 0px)) !important;
   .cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); column-gap: 28px; align-items: start; }
   .cols .col-a { position: sticky; top: calc(14px + env(safe-area-inset-top, 0px));
     max-height: calc(100vh - 28px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px)); max-height: calc(100dvh - 28px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
-    overflow-y: auto; overscroll-behavior: contain; scrollbar-width: none; padding-bottom: 28px; }
+    overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; scrollbar-width: none;
+    padding: 6px 14px 28px; margin: -6px -14px 0; }   /* the padding keeps card shadows from being clipped; the margin cancels it out */
   .cols .col-a::-webkit-scrollbar { display: none; }
 }
 .b-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 11px 0; border-top: 1px solid var(--line); cursor: pointer; -webkit-tap-highlight-color: transparent; }
