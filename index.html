@@ -1167,7 +1167,10 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
     $app.querySelectorAll("[data-del]").forEach(b => b.onclick = () => deleteSnapshot(b.dataset.del));
     $app.querySelectorAll("[data-bal]").forEach(btn => { btn.onclick = e => { e.stopPropagation(); startBalanceEdit(btn); }; btn.onkeydown = e => e.stopPropagation(); });
     $app.querySelectorAll(".acct-toggle").forEach(r => {
-      const toggle = () => { openAcct = openAcct === r.dataset.acct ? null : r.dataset.acct; render(); };
+      const toggle = () => {
+        const key = r.dataset.acct, opening = openAcct !== key;
+        anchorRender(r, () => { openAcct = opening ? key : null; render(); }, () => $app.querySelector(`.acct-toggle[data-acct="${key}"]`), opening ? "#acctChart" : null);
+      };
       r.onclick = toggle;
       r.onkeydown = e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(); } };
     });
@@ -2044,7 +2047,17 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
     if (i) i.onchange = e => setChangeDate(e.target.value || null);
     if (t) t.onclick = () => setChangeDate(null);
   }
-  window.NWUI = { bindMini, changeDate, setChangeDate, dateBarHtml, bindDateBar, todayISO, openExport: (kind, v) => openExport(kind, v), nwExportData };
+  // Redraw after an expand/collapse without the screen shifting under your finger: the row you tapped stays where it was,
+  // even when another row above it closes at the same moment. Nothing else scrolls on its own.
+  function anchorRender(el, redraw, findAgain) {
+    const before = el.getBoundingClientRect().top;
+    redraw();
+    const now = findAgain();
+    if (!now) return;
+    const sc = now.closest(".col-a"), shift = d => { if (Math.abs(d) < 1) return; if (sc) sc.scrollTop += d; else window.scrollBy(0, d); };
+    shift(now.getBoundingClientRect().top - before);
+  }
+  window.NWUI = { anchorRender, bindMini, changeDate, setChangeDate, dateBarHtml, bindDateBar, todayISO, openExport: (kind, v) => openExport(kind, v), nwExportData };
 
   // Shared with the Budget tab
   window.NW = { readFile, writeFile, parseCSV, toCSV, toast, openSheet, closeSheet, esc,
@@ -2801,11 +2814,17 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
 
     $b.querySelectorAll("[data-bview]").forEach(btn => btn.onclick = () => { view = btn.dataset.bview; render(); });
     $b.querySelectorAll("[data-group]").forEach(r => {
-      const t = () => { const g = r.dataset.group; openGroups.has(g) ? openGroups.delete(g) : openGroups.add(g); render(); };
+      const t = () => {
+        const g = r.dataset.group, opening = !openGroups.has(g);
+        window.NWUI.anchorRender(r, () => { opening ? openGroups.add(g) : openGroups.delete(g); render(); }, () => [...$b.querySelectorAll("[data-group]")].find(x => x.dataset.group === g));
+      };
       r.onclick = t; r.onkeydown = e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); t(); } };
     });
     $b.querySelectorAll("[data-toggle]").forEach(r => {
-      const t = () => { openId = openId === r.dataset.toggle ? null : r.dataset.toggle; render(); };
+      const t = () => {
+        const key = r.dataset.toggle, opening = openId !== key;
+        window.NWUI.anchorRender(r, () => { openId = opening ? key : null; render(); }, () => [...$b.querySelectorAll("[data-toggle]")].find(x => x.dataset.toggle === key), opening ? `[data-detail="${key}"], [data-cdetail="${key}"]` : null);
+      };
       r.onclick = t; r.onkeydown = e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); t(); } };
     });
     $b.querySelectorAll("[data-qsave]").forEach(btn => btn.onclick = () => quickSave(btn.dataset.qsave));
@@ -2829,13 +2848,16 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
     });
     window.NWUI.bindDateBar($b);
     const lt = document.getElementById("logToggle");
-    if (lt) lt.onclick = () => { logOpen = !logOpen; render(); };
+    if (lt) lt.onclick = () => window.NWUI.anchorRender(lt, () => { logOpen = !logOpen; render(); }, () => document.getElementById("logToggle"));
     $b.querySelectorAll("[data-lgroup]").forEach(r => {
-      const t = () => { const k = r.dataset.lgroup; logOpenItems.has(k) ? logOpenItems.delete(k) : logOpenItems.add(k); render(); };
+      const t = () => {
+        const k = r.dataset.lgroup;
+        window.NWUI.anchorRender(r, () => { logOpenItems.has(k) ? logOpenItems.delete(k) : logOpenItems.add(k); render(); }, () => [...$b.querySelectorAll("[data-lgroup]")].find(x => x.dataset.lgroup === k));
+      };
       r.onclick = t; r.onkeydown = e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); t(); } };
     });
     const jt = document.getElementById("jointToggle");
-    if (jt) jt.onclick = () => { jointOpen = !jointOpen; render(); };
+    if (jt) jt.onclick = () => window.NWUI.anchorRender(jt, () => { jointOpen = !jointOpen; render(); }, () => document.getElementById("jointToggle"));
     document.getElementById("bExport").onclick = () => window.NWUI.openExport("budget", view);
     document.getElementById("bExportTop").onclick = () => window.NWUI.openExport("budget", view);
     document.getElementById("bAdd").onclick = () => openItem(null);
