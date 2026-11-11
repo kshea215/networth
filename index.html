@@ -1550,65 +1550,111 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
     return y + 46;
   }
 
+  // ----- two-column body: blocks (a heading plus its lines) are packed into two balanced columns, in order -----
+  const exRowH = r => (r.t === "child" ? 18 : 20);
+  const exBlockH = b => (b.card ? 94 : 42 + b.rows.reduce((t, r) => t + exRowH(r), 0) + 10);
+  function exPaintBlock(ctx, b, x, y, w) {
+    if (b.card) {                                        // the joint account summary
+      exRR(ctx, x, y, w, 78, 16); ctx.fillStyle = EX.card; ctx.fill();
+      exText(ctx, b.card.title, x + 16, y + 26, `700 11px ${EXF}`, EX.muted);
+      const cw = (w - 32) / b.card.cells.length;
+      b.card.cells.forEach(([n, v], i) => {
+        exText(ctx, n, x + 16 + cw * i, y + 46, `500 12px ${EXF}`, EX.muted);
+        exText(ctx, exMoney(v, 2), x + 16 + cw * i, y + 66, `800 16px ${EXF}`, EX.text);
+      });
+      return;
+    }
+    ctx.beginPath(); ctx.arc(x + 5, y + 9, 5, 0, Math.PI * 2); ctx.fillStyle = b.color; ctx.fill();
+    exText(ctx, b.title, x + 20, y + 14, `700 15px ${EXF}`, EX.text);
+    exText(ctx, b.total, x + w, y + 14, `700 15px ${EXF}`, b.totalColor || EX.text, "right");
+    ctx.fillStyle = EX.line; ctx.fillRect(x, y + 24, w, 1);
+    let ry = y + 44;
+    b.rows.forEach(r => {
+      const child = r.t === "child", group = r.t === "group", calc = r.t === "calc";
+      const font = `${group ? 600 : 500} ${child ? 12 : 13}px ${EXF}`;
+      const col = child ? "rgba(245,245,247,0.62)" : calc ? EX.muted : group ? EX.text : "rgba(245,245,247,0.86)";
+      ctx.font = font;
+      const aw = ctx.measureText(r.amount).width, nx = x + (child ? 36 : 20);
+      exText(ctx, exFit(ctx, r.name, x + w - aw - 12 - nx), nx, ry, font, col);
+      exText(ctx, r.amount, x + w, ry, font, r.neg ? EX.down : col, "right");
+      ry += exRowH(r);
+    });
+  }
+  function exColumns(ctx, blocks, x, y, w, gap) {
+    const colW = (w - gap) / 2, hs = blocks.map(exBlockH), n = blocks.length;
+    let bestMask = 0, bestMax = Infinity;
+    for (let mask = 0; mask < (1 << n); mask++) {        // try every way of dealing the blocks into two columns; keep the shortest
+      let L = 0, R = 0;
+      for (let i = 0; i < n; i++) { if (mask & (1 << i)) R += hs[i]; else L += hs[i]; }
+      const m = Math.max(L, R);
+      if (m < bestMax - 0.5) { bestMax = m; bestMask = mask; }
+    }
+    if (bestMask & 1) bestMask ^= (1 << n) - 1;          // the first block always goes in the left column
+    let ly = y, ry = y;
+    blocks.forEach((b, i) => {                           // each column keeps the blocks' original order
+      if (bestMask & (1 << i)) { exPaintBlock(ctx, b, x + colW + gap, ry, colW); ry += hs[i]; }
+      else { exPaintBlock(ctx, b, x, ly, colW); ly += hs[i]; }
+    });
+    return Math.max(ly, ry);
+  }
+
   function exPaintNW(ctx, W, d) {
-    const P = 30, inner = W - P * 2;
+    const P = 32, inner = W - P * 2;
     exHeader(ctx, W, P, "NET WORTH", d.viewName);
-    exText(ctx, exMoney(d.nw), P, 118, `800 58px ${EXF}`, EX.text);
-    let y = 150;
+    exText(ctx, exMoney(d.nw), P, 122, `800 58px ${EXF}`, EX.text);
+    let y = 154;
     if (d.change != null) {
       const a = exSigned(d.change);
       exText(ctx, a, P, y, `700 17px ${EXF}`, d.change >= 0 ? EX.up : EX.down);
       const w = ctx.measureText(a).width;
       exText(ctx, "  since " + d.prevLabel, P + w, y, `500 17px ${EXF}`, EX.muted);
     } else exText(ctx, "First entry " + d.dateLabel, P, y, `500 17px ${EXF}`, EX.muted);
-    y += 30;
 
-    if (d.points.length > 1) {                           // the trend line
-      const top = y, h = 92, pts = d.points, vs = pts.map(p => p.v);
+    if (d.points.length > 1) {                           // the trend line, beside the number
+      const sx = P + 400, sw = W - P - sx, top = 66, h = 84, pts = d.points, vs = pts.map(p => p.v);
       const mn = Math.min(...vs), mx = Math.max(...vs), span = mx - mn || 1, t0 = pts[0].t, ts = (pts[pts.length - 1].t - t0) || 1;
-      const X = p => P + ((p.t - t0) / ts) * inner, Y = p => top + 8 + (1 - (p.v - mn) / span) * (h - 16);
+      const X = p => sx + ((p.t - t0) / ts) * (sw - 8), Y = p => top + 8 + (1 - (p.v - mn) / span) * (h - 16);
       const col = vs[vs.length - 1] >= vs[0] ? EX.up : EX.down;
       ctx.beginPath(); pts.forEach((p, i) => (i ? ctx.lineTo(X(p), Y(p)) : ctx.moveTo(X(p), Y(p))));
       ctx.lineWidth = 3; ctx.lineJoin = "round"; ctx.lineCap = "round"; ctx.strokeStyle = col; ctx.stroke();
-      ctx.lineTo(P + inner, top + h); ctx.lineTo(P, top + h); ctx.closePath();
+      ctx.lineTo(sx + sw - 8, top + h); ctx.lineTo(sx, top + h); ctx.closePath();
       const g = ctx.createLinearGradient(0, top, 0, top + h); g.addColorStop(0, exAlpha(col, 0.30)); g.addColorStop(1, exAlpha(col, 0));
       ctx.fillStyle = g; ctx.fill();
       const lp = pts[pts.length - 1];
-      ctx.beginPath(); ctx.arc(X(lp), Y(lp), 5, 0, Math.PI * 2); ctx.fillStyle = col; ctx.fill();
-      ctx.beginPath(); ctx.arc(X(lp), Y(lp), 8.5, 0, Math.PI * 2); ctx.strokeStyle = exAlpha(col, 0.35); ctx.lineWidth = 2; ctx.stroke();
+      ctx.beginPath(); ctx.arc(X(lp), Y(lp), 4.5, 0, Math.PI * 2); ctx.fillStyle = col; ctx.fill();
+      ctx.beginPath(); ctx.arc(X(lp), Y(lp), 8, 0, Math.PI * 2); ctx.strokeStyle = exAlpha(col, 0.35); ctx.lineWidth = 2; ctx.stroke();
       const mo = t => new Date(t).toLocaleDateString("en-US", { month: "short", year: "numeric" });
-      exText(ctx, mo(pts[0].t), P, top + h + 20, `500 12px ${EXF}`, EX.muted);
-      exText(ctx, mo(lp.t), W - P, top + h + 20, `500 12px ${EXF}`, EX.muted, "right");
-      y = top + h + 52;
+      exText(ctx, mo(pts[0].t), sx, top + h + 20, `500 12px ${EXF}`, EX.muted);
+      exText(ctx, mo(lp.t), sx + sw - 8, top + h + 20, `500 12px ${EXF}`, EX.muted, "right");
     }
-
-    if (d.cats.length) {                                 // where the money sits
+    y = 196;
+    if (d.cats.length) {                                 // where the money sits: a bar and a one-line legend
       const total = d.cats.reduce((t, c) => t + c.amount, 0);
-      exText(ctx, "WHERE IT SITS", P, y, `700 12px ${EXF}`, EX.muted); y += 14;
-      exBar(ctx, P, y, inner, 14, d.cats); y += 14 + 28;
+      exBar(ctx, P, y, inner, 14, d.cats); y += 14 + 24;
+      let x = P;
       d.cats.forEach(c => {
-        ctx.beginPath(); ctx.arc(P + 5, y - 5, 5, 0, Math.PI * 2); ctx.fillStyle = c.color; ctx.fill();
-        exText(ctx, c.name, P + 20, y, `500 15px ${EXF}`, EX.text);
-        exText(ctx, exMoney(c.amount), W - P, y, `700 15px ${EXF}`, EX.text, "right");
-        const pc = (c.amount / total) * 100;
-        exText(ctx, pc < 1 ? "<1%" : Math.round(pc) + "%", W - P - 98, y, `500 13px ${EXF}`, EX.muted, "right");
-        y += 27;
+        const pc = (c.amount / total) * 100, pct = pc < 1 ? "<1%" : Math.round(pc) + "%";
+        ctx.font = `600 13px ${EXF}`; const nameW = ctx.measureText(c.name).width;
+        ctx.font = `800 13px ${EXF}`; const pctW = ctx.measureText(pct).width;
+        const need = 16 + nameW + 6 + pctW;
+        if (x + need > W - P + 1) { x = P; y += 22; }
+        ctx.beginPath(); ctx.arc(x + 5, y - 5, 4.5, 0, Math.PI * 2); ctx.fillStyle = c.color; ctx.fill();
+        exText(ctx, c.name, x + 16, y, `600 13px ${EXF}`, EX.muted);
+        exText(ctx, pct, x + 16 + nameW + 6, y, `800 13px ${EXF}`, EX.text);
+        x += need + 22;
       });
+      y += 34;
     }
-    if (d.debts > 0.5 || d.equity) {
-      y += 2; ctx.fillStyle = EX.line; ctx.fillRect(P, y - 12, inner, 1); y += 12;
-      if (d.debts > 0.5) { exText(ctx, "Debts", P, y, `500 15px ${EXF}`, EX.muted); exText(ctx, "−" + exMoney(d.debts), W - P, y, `700 15px ${EXF}`, EX.down, "right"); y += 27; }
-      if (d.equity) { exText(ctx, `Home equity (${d.equity.pct}%)`, P, y, `500 15px ${EXF}`, EX.muted); exText(ctx, exMoney(d.equity.value), W - P, y, `700 15px ${EXF}`, EX.text, "right"); y += 27; }
-    }
-    return exFooter(ctx, W, P, y - 4, "As of " + d.dateLabel);
+    y = exColumns(ctx, d.groups.map(g => ({ color: g.color, title: g.name, total: g.totalText, totalColor: g.kind === "liability" ? EX.down : EX.text, rows: g.rows })), P, y, inner, 32);
+    return exFooter(ctx, W, P, y, "As of " + d.dateLabel);
   }
 
   function exPaintBudget(ctx, W, d) {
-    const P = 30, inner = W - P * 2;
+    const P = 32, inner = W - P * 2;
     exHeader(ctx, W, P, "BUDGET", d.viewName);
     exText(ctx, "Monthly take-home", P, 84, `600 14px ${EXF}`, EX.muted);
-    exText(ctx, exMoney(d.takeHome), P, 134, `800 54px ${EXF}`, EX.text);
-    let y = 164;
+    exText(ctx, exMoney(d.takeHome), P, 136, `800 54px ${EXF}`, EX.text);
+    let y = 166;
     const b = "Budgeted " + exMoney(d.budgeted, 2);
     exText(ctx, b, P, y, `500 15px ${EXF}`, EX.muted);
     const bw = ctx.measureText(b).width;
@@ -1617,61 +1663,29 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
     y += 24;
     exText(ctx, "Savings rate", P, y, `500 15px ${EXF}`, EX.muted);
     exText(ctx, (d.rate * 100).toFixed(1) + "%", P + ctx.measureText("Savings rate ").width + 4, y, `700 15px ${EXF}`, EX.text);
-    y += 24;
 
-    exBar(ctx, P, y, inner, 14, d.sections.map(s => ({ amount: s.total, color: s.color }))); y += 14 + 24;
-    const colW = inner / 3;                              // legend under the bar: name and share of income
-    d.sections.forEach((s, i) => {
-      const x = P + colW * i, pc = (d.takeHome ? Math.round((s.total / d.takeHome) * 100) : 0) + "%";
-      ctx.beginPath(); ctx.arc(x + 5, y - 5, 4.5, 0, Math.PI * 2); ctx.fillStyle = s.color; ctx.fill();
-      exText(ctx, s.name, x + 16, y, `600 13px ${EXF}`, EX.muted);
-      exText(ctx, pc, x + 16 + ctx.measureText(s.name + " ").width + 2, y, `800 13px ${EXF}`, EX.text);
+    const rx = P + 392, rw = W - P - rx;                 // the three sections, beside the headline
+    d.sections.forEach((sec, i) => {
+      const ry = 80 + i * 32, pc = (d.takeHome ? Math.round((sec.total / d.takeHome) * 100) : 0) + "%";
+      ctx.beginPath(); ctx.arc(rx + 5, ry - 5, 4.5, 0, Math.PI * 2); ctx.fillStyle = sec.color; ctx.fill();
+      exText(ctx, sec.name, rx + 16, ry, `600 14px ${EXF}`, EX.muted);
+      exText(ctx, exMoney(sec.total), rx + rw, ry, `800 16px ${EXF}`, EX.text, "right");
+      exText(ctx, pc, rx + rw - 86, ry, `500 13px ${EXF}`, EX.muted, "right");
     });
-    y += 38;
+    y = 206;
+    exBar(ctx, P, y, inner, 14, d.sections.map(sec => ({ amount: sec.total, color: sec.color }))); y += 14 + 30;
 
-    const MAX = { necessity: 7, discretionary: 4, savings: 6 };
-    d.sections.forEach(s => {
-      if (!s.rows.length) return;
-      ctx.fillStyle = EX.line; ctx.fillRect(P, y - 12, inner, 1); y += 10;
-      ctx.beginPath(); ctx.arc(P + 5, y - 5, 5, 0, Math.PI * 2); ctx.fillStyle = s.color; ctx.fill();
-      exText(ctx, s.name, P + 20, y, `700 15px ${EXF}`, EX.text);
-      exText(ctx, exMoney(s.total, 2), W - P, y, `700 15px ${EXF}`, EX.text, "right");
-      y += 24;
-      const max = MAX[s.id] || 6;
-      const shown = s.rows.length > max ? s.rows.slice(0, max - 1) : s.rows;
-      const rest = s.rows.length > max ? s.rows.slice(max - 1) : [];
-      shown.forEach(r => {
-        ctx.font = `500 14px ${EXF}`;
-        exText(ctx, exFit(ctx, r.name, inner - 120), P + 20, y, `500 14px ${EXF}`, "rgba(245,245,247,0.82)");
-        exText(ctx, exMoney(r.amount, 2), W - P, y, `500 14px ${EXF}`, "rgba(245,245,247,0.82)", "right");
-        y += 21;
-      });
-      if (rest.length) {
-        exText(ctx, `+${rest.length} more`, P + 20, y, `500 14px ${EXF}`, EX.muted);
-        exText(ctx, exMoney(rest.reduce((t, r) => t + r.amount, 0), 2), W - P, y, `500 14px ${EXF}`, EX.muted, "right");
-        y += 21;
-      }
-      y += 14;
-    });
-
-    if (d.joint.has) {                                   // what goes into the joint account
-      y -= 2;
-      exRR(ctx, P, y, inner, 78, 16); ctx.fillStyle = EX.card; ctx.fill();
-      exText(ctx, "INTO THE JOINT ACCOUNT EACH MONTH", P + 18, y + 26, `700 11px ${EXF}`, EX.muted);
-      const cells = d.view === "household" ? [["Kyle", d.joint.k], ["Victoria", d.joint.v], ["Total", d.joint.k + d.joint.v]]
-        : d.view === "kyle" ? [["Kyle", d.joint.k]] : [["Victoria", d.joint.v]];
-      const cw = (inner - 36) / cells.length;
-      cells.forEach(([n, v], i) => {
-        exText(ctx, n, P + 18 + cw * i, y + 46, `500 12px ${EXF}`, EX.muted);
-        exText(ctx, exMoney(v, 2), P + 18 + cw * i, y + 66, `800 17px ${EXF}`, EX.text);
-      });
-      y += 78 + 22;
+    const blocks = d.sections.filter(sec => sec.rows.length).map(sec => ({ color: sec.color, title: sec.name, total: exMoney(sec.total, 2), rows: sec.rows.map(r => ({ ...r, amount: exMoney(r.amount, 2) })) }));
+    if (d.joint.has) {
+      const cells = d.view === "household" ? [["Kyle", d.joint.k], ["Victoria", d.joint.v], ["Total", d.joint.k + d.joint.v]] : d.view === "kyle" ? [["Kyle", d.joint.k]] : [["Victoria", d.joint.v]];
+      blocks.push({ card: { title: "INTO THE JOINT ACCOUNT EACH MONTH", cells } });
     }
+    y = exColumns(ctx, blocks, P, y, inner, 32);
     return exFooter(ctx, W, P, y, exLong(todayISO()));
   }
 
   function exRender(kind, data, scale) {
-    const W = 540, sc = scale || 2;
+    const W = 760, sc = scale || 2;
     const H = Math.ceil((kind === "nw" ? exPaintNW : exPaintBudget)(document.createElement("canvas").getContext("2d"), W, data));
     const c = document.createElement("canvas"); c.width = W * sc; c.height = H * sc;
     const ctx = c.getContext("2d"); ctx.scale(sc, sc);
@@ -1684,7 +1698,7 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
     return c;
   }
 
-  // The numbers behind a net worth image, for whichever view
+  // The numbers behind a net worth image, for whichever view: every account with a balance, grouped like the screen
   function nwExportData(v) {
     const keep = view; view = v;
     try {
@@ -1699,11 +1713,20 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
       const home = find("home", "asset"), mort = find("mortgage", "liability");
       const equity = home && mort && bal[home.id] != null && bal[mort.id] != null
         ? { value: bal[home.id] - bal[mort.id], pct: bal[home.id] ? Math.round(((bal[home.id] - bal[mort.id]) / bal[home.id]) * 100) : 0 } : null;
+      const groups = [];
+      CATEGORIES.forEach(c => {
+        const list = accts.filter(a => !a.archived && a.kind === c.kind && catOf(a) === c.id && bal[a.id] != null && Math.abs(bal[a.id]) >= 0.005);
+        if (!list.length) return;
+        const total = list.reduce((t, a) => t + bal[a.id], 0), liab = c.kind === "liability";
+        const rows = list.map(a => ({ t: "row", name: a.name, amount: (liab ? "−" : "") + exMoney(bal[a.id]), neg: liab }));
+        if (c.id === "property" && equity) rows.push({ t: "calc", name: `Home equity (${equity.pct}%)`, amount: exMoney(equity.value) });
+        groups.push({ name: c.name, color: c.color || EX.down, kind: c.kind, totalText: (liab ? "−" : "") + exMoney(total), rows });
+      });
       const tOf = p => Date.parse(p.date + "T00:00:00");
       let pts = sr.filter(p => tOf(p) >= tOf(last) - 366 * 864e5);
       if (pts.length < 2) pts = sr.slice(-12);
       return { view: v, viewName: OWNERS.find(o => o[0] === v)[1], nw: last.nw, assets: last.assets, debts: last.liabilities,
-        change: prev ? last.nw - prev.nw : null, prevLabel: prev ? shortDate(prev.date) : "", dateLabel: exLong(last.date), cats, equity,
+        change: prev ? last.nw - prev.nw : null, prevLabel: prev ? shortDate(prev.date) : "", dateLabel: exLong(last.date), cats, equity, groups,
         points: pts.map(p => ({ t: tOf(p), v: p.nw })) };
     } finally { view = keep; }
   }
@@ -2059,7 +2082,7 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
       if (!loaded) await (loading && loadPromise ? loadPromise : load());
     },
     get: () => ({ ...settings }),
-    // The numbers behind a budget image, for whichever view (groups are rolled up to one line each)
+    // The numbers behind a budget image, for whichever view: every line, with groups opened up under their heading
     exportData(v) {
       if (!loaded || !items.length) return null;
       const keep = view; view = v;
@@ -2067,12 +2090,16 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
         const inc = income();
         const live = items.filter(i => amt(i) > 0.004);
         const sections = SECTIONS.map(sec => {
-          const list = live.filter(i => i.section === sec.id), byGroup = new Map(), rows = [];
+          const list = live.filter(i => i.section === sec.id), byGroup = new Map(), top = [];
           list.forEach(i => {
-            if (i.group) { if (!byGroup.has(i.group)) { const r = { name: i.group, amount: 0 }; byGroup.set(i.group, r); rows.push(r); } byGroup.get(i.group).amount += amt(i); }
-            else rows.push({ name: i.name, amount: amt(i) });
+            if (i.group) {
+              if (!byGroup.has(i.group)) { const g = { t: "group", name: i.group, amount: 0, kids: [] }; byGroup.set(i.group, g); top.push(g); }
+              const g = byGroup.get(i.group); g.amount += amt(i); g.kids.push({ t: "child", name: i.name, amount: amt(i) });
+            } else top.push({ t: "row", name: i.name, amount: amt(i) });
           });
-          rows.sort((a, b) => b.amount - a.amount);
+          top.sort((a, b) => b.amount - a.amount);
+          const rows = [];
+          top.forEach(r => { rows.push({ t: r.t, name: r.name, amount: r.amount }); if (r.kids) r.kids.sort((a, b) => b.amount - a.amount).forEach(k => rows.push(k)); });
           return { id: sec.id, name: sec.name, color: sec.color, total: list.reduce((t, i) => t + amt(i), 0), rows };
         });
         const budgeted = sections.reduce((t, x) => t + x.total, 0), joint = live.filter(i => i.joint);
