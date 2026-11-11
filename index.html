@@ -189,6 +189,21 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
 .log-latest { text-align: right; flex-shrink: 0; font-weight: 700; }
 .log-latest .b-sub { font-weight: 500; }
 
+/* Gifts: check circles and what's been bought */
+.gift-line { display: flex; align-items: center; gap: 10px; }
+.gift-name { min-width: 0; }
+.gift-name .b-sub { display: block; font-weight: 500; }
+.gift-name.done { color: var(--muted); }
+.gift-check { flex-shrink: 0; width: 24px; height: 24px; border-radius: 50%; border: 2px solid var(--muted); background: transparent; color: #fff; font-size: 14px; font-weight: 800; line-height: 1; padding: 0; display: inline-flex; align-items: center; justify-content: center; -webkit-tap-highlight-color: transparent; }
+.gift-check.all { background: var(--up); border-color: var(--up); }
+.gift-check.some { border-color: var(--up); color: var(--up); }
+.gift-check:disabled { opacity: 0.35; }
+.gift-summary { margin: 2px 0 6px 14px; padding: 8px 12px; border-radius: 12px; background: var(--surface-2); font-size: 13px; font-weight: 600; color: var(--muted); }
+.gift-summary b { color: var(--text); }
+.gift-occs { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 8px; }
+.gift-occ { border: 0; border-radius: 999px; padding: 7px 12px; background: var(--surface-2); color: var(--muted); font-size: 13px; font-weight: 700; }
+.gift-occ.on { background: rgba(48, 209, 88, 0.16); color: var(--up); }
+
 /* Export as an image */
 .export-link { display: block; width: 100%; margin: -6px 0 18px; text-align: center; font-size: 14px; }
 .export-prev { margin: 12px 0; min-height: 120px; }
@@ -485,6 +500,7 @@ details.history[open] summary::after { content: "Hide"; }
   .mover-name { max-width: 110px; }
   .group { padding: 4px 12px; }
   .group-head { flex-wrap: wrap; gap: 2px 8px; }
+  .gift-occ { font-size: 12px; padding: 6px 9px; }
   .footer { flex-wrap: wrap; }
   .footer button { flex: 1 1 100%; }
   .group-head h2 { font-size: 13px; }
@@ -508,6 +524,12 @@ details.history[open] summary::after { content: "Hide"; }
   .ranges button { padding: 6px 8px; }
   .primary, .secondary { font-size: 15px; }
   .log-name, .log-amts { font-size: 13px; }
+}
+@container (max-width: 200px) {
+  .view-seg { padding: 2px; }
+  .view-seg button { font-size: 11px; padding: 8px 1px; }
+  .ranges { gap: 2px; }
+  .ranges button { padding: 6px 6px; font-size: 13px; }
 }
 </style>
 </head>
@@ -983,7 +1005,13 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
   }
 
   // ---------- rendering ----------
-  function render() {
+  function render() {                                    // redraw, but keep the pinned left column where it was scrolled to
+    const ca = $app.querySelector(".col-a"), keep = ca ? ca.scrollTop : 0;
+    renderCore();
+    const na = $app.querySelector(".col-a");
+    if (na && keep) na.scrollTop = keep;
+  }
+  function renderCore() {
     if (!loaded) return;
     const active = state.accounts.filter(a => !a.archived);
     if (!state.accounts.length) return renderEmpty();
@@ -2248,7 +2276,7 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
     pets = peText ? a.parseCSV(peText).map(r => ({ id: r.id, product: r.product, pet: r.pet || "", category: r.category || "",
       months: parseFloat(r.months) || 0, cost: num(r.cost) })).filter(x => x.id && x.product) : [];
     gifts = giText ? a.parseCSV(giText).map(r => ({ id: r.id, name: r.name, christmas: num(r.christmas), birthday: num(r.birthday),
-      birthday_date: r.birthday_date || "", special: num(r.special), special_date: r.special_date || "" })).filter(x => x.id && x.name) : [];
+      birthday_date: r.birthday_date || "", special: num(r.special), special_date: r.special_date || "", bought: r.bought || "" })).filter(x => x.id && x.name) : [];
   }
 
   const DETAIL_FILES = {
@@ -2256,8 +2284,8 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
       funds.map(f => [f.id, f.name, f.category, f.person, f.started, f.amount.toFixed(2), String(f.years)])),
     pets: () => api().toCSV(["id", "product", "pet", "category", "months", "cost"],
       pets.map(x => [x.id, x.product, x.pet, x.category, String(x.months), x.cost.toFixed(2)])),
-    gifts: () => api().toCSV(["id", "name", "christmas", "birthday", "birthday_date", "special", "special_date"],
-      gifts.map(g => [g.id, g.name, g.christmas.toFixed(2), g.birthday.toFixed(2), g.birthday_date, g.special.toFixed(2), g.special_date])),
+    gifts: () => api().toCSV(["id", "name", "christmas", "birthday", "birthday_date", "special", "special_date", "bought"],
+      gifts.map(g => [g.id, g.name, g.christmas.toFixed(2), g.birthday.toFixed(2), g.birthday_date, g.special.toFixed(2), g.special_date, g.bought || ""])),
   };
 
   // Keep Kyle's paycheck 1 / 2 proportions when a total is recalculated
@@ -2486,6 +2514,28 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
     return null;
   }
 
+  // Gifts bought: "christmas-2026;birthday-2026" lives in gifts.csv, so every check resets itself when the year turns over
+  const giftYr = () => new Date().getFullYear();
+  const giftOccasions = g => [["christmas", "Christmas", g.christmas, ""], ["birthday", "Birthday", g.birthday, g.birthday_date], ["special", "Special", g.special, g.special_date]]
+    .filter(o => o[2] > 0.004).map(([id, label, amount, date]) => ({ id, label, amount, date }));
+  const giftBoughtSet = g => new Set(String(g.bought || "").split(";").filter(Boolean));
+  function giftStatus(g) {
+    const occ = giftOccasions(g), set = giftBoughtSet(g), yr = giftYr();
+    const done = occ.filter(o => set.has(`${o.id}-${yr}`));
+    return { total: occ.length, done: done.length, dollars: done.reduce((t, o) => t + o.amount, 0), all: occ.length > 0 && done.length === occ.length };
+  }
+  async function toggleGift(id, occasion) {
+    const g = gifts.find(x => x.id === id);
+    if (!g) return;
+    const yr = giftYr(), set = giftBoughtSet(g);
+    const keys = occasion ? [`${occasion}-${yr}`] : giftOccasions(g).map(o => `${o.id}-${yr}`);
+    const allOn = keys.length > 0 && keys.every(k => set.has(k));
+    keys.forEach(k => (allOn ? set.delete(k) : set.add(k)));
+    g.bought = [...set].filter(k => k.endsWith("-" + yr)).join(";");     // old years drop away
+    render();
+    await save(["gifts"]);
+  }
+
   function childDesc(type, o) {
     if (type === "fund") {
       const due = addMonths(o.started, o.years * 12);
@@ -2502,16 +2552,29 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
     const amtHtml = editable
       ? `<button class="b-amt num amt-edit" data-camt="${key}" aria-label="Edit ${esc(row.name)} monthly amount">${fmt.format(row.m)}</button>`
       : `<div class="b-amt num">${fmt.format(row.m)}</div>`;
+    let nameHtml = esc(row.name);
+    if (type === "gift") {                                // a check circle: tap to mark everything for this person bought
+      const st = giftStatus(o), state = st.total === 0 ? "none" : st.all ? "all" : st.done ? "some" : "none";
+      nameHtml = `<button class="gift-check ${state}" data-gcheck="${o.id}" aria-label="${st.all ? "Clear" : "Mark"} all of ${esc(row.name)}’s gifts as bought" ${st.total ? "" : "disabled"}>${state === "all" ? "✓" : state === "some" ? "–" : ""}</button>`
+        + `<span class="gift-name${st.all ? " done" : ""}">${esc(row.name)}${st.total ? `<span class="b-sub">${st.all ? "all bought" : st.done ? `${st.done} of ${st.total} bought` : ""}</span>` : ""}</span>`;
+    }
     let html = `<div class="b-row child${open ? " open" : ""}" data-toggle="${key}" role="button" tabindex="0" aria-expanded="${open}">
-      <div class="b-name">${esc(row.name)}</div>${amtHtml}</div>`;
+      <div class="b-name${type === "gift" ? " gift-line" : ""}">${nameHtml}</div>${amtHtml}</div>`;
     if (!open) return html;
     const money = v => (v ? v.toFixed(2) : "");
     const f = (k, label, v, isMoney = true) => `<label class="b-q"><span>${label}</span><input data-c="${k}" value="${isMoney ? money(v) : (v || "")}" inputmode="decimal" placeholder="0" autocomplete="off"></label>`;
     const fields = type === "fund" ? [f("amount", "Amount needed", o.amount), f("years", "Every (years)", o.years, false)]
       : type === "pet" ? [f("cost", "Cost", o.cost), f("months", "Lasts (months)", o.months, false)]
       : [f("christmas", "Christmas", o.christmas), f("birthday", "Birthday", o.birthday), f("special", "Special", o.special)];
+    const occHtml = type !== "gift" ? "" : (() => {
+      const set = giftBoughtSet(o), yr = giftYr(), d = iso => (iso ? new Date(iso + "T12:00").toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "");
+      const list = giftOccasions(o);
+      return list.length ? `<div class="gift-occs" aria-label="Bought this year">${list.map(x => { const on = set.has(`${x.id}-${yr}`);
+        return `<button class="gift-occ${on ? " on" : ""}" data-gocc="${o.id}:${x.id}" aria-pressed="${on}">${on ? "✓ " : ""}${x.label}${x.date ? " " + d(x.date) : ""} · ${fmt0.format(x.amount)}</button>`; }).join("")}</div>` : "";
+    })();
     return html + `<div class="b-detail child" data-cdetail="${key}">
       <p class="b-sub">${esc(childDesc(type, o))}</p>
+      ${occHtml}
       <div class="b-quick">${fields.join("")}</div>
       <div class="b-actions"><button class="b-save" data-csave="${key}">Save</button><button class="b-more" data-cmore="${key}">More options</button></div>
     </div>`;
@@ -2615,7 +2678,13 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
     if (changed) { changeNote = "Edited in the list"; await save(); }
   }
 
-  function render() {
+  function render() {                                    // redraw, but keep the pinned left column where it was scrolled to
+    const ca = $b.querySelector(".col-a"), keep = ca ? ca.scrollTop : 0;
+    renderCore();
+    const na = $b.querySelector(".col-a");
+    if (na && keep) na.scrollTop = keep;
+  }
+  function renderCore() {
     if (!loaded) return;
     const a = api(), esc = a.esc;
     if (!items.length && !(settings.kyle_net || settings.victoria_net)) return renderEmpty();
@@ -2680,6 +2749,11 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
             <div class="b-name">${esc(i.name)}<span class="b-caret">${open ? "▲" : "▼"} ${dd.rows.length}</span></div>
             <div class="b-amt num">${fmt.format(amt(i))}</div></div>`);
           if (open) {
+            if (dd.type === "gift") {
+              const sts = gifts.map(giftStatus), tot = sts.reduce((t, x) => t + x.total, 0), done = sts.reduce((t, x) => t + x.done, 0);
+              const planned = gifts.reduce((t, g) => t + giftOccasions(g).reduce((u, o) => u + o.amount, 0), 0), spent = sts.reduce((t, x) => t + x.dollars, 0);
+              rows.push(`<div class="gift-summary">Bought this year: <b>${done} of ${tot}</b> gifts · ${fmt0.format(spent)} of ${fmt0.format(planned)} planned</div>`);
+            }
             dd.rows.sort((a, b) => b.m - a.m).forEach(r => rows.push(childRow(dd.type, r)));
             rows.push(`<div class="b-row child add-row" data-add="${dd.type}" data-person="${dd.person || view}" role="button" tabindex="0"><div class="b-name">+ ${dd.add}</div></div>`);
           }
@@ -2767,6 +2841,8 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
     document.getElementById("bAdd").onclick = () => openItem(null);
     document.getElementById("bIncome").onclick = openIncome;
     $b.querySelectorAll("[data-amt]").forEach(btn => { btn.onclick = e => { e.stopPropagation(); startInline(btn, "item"); }; btn.onkeydown = e => e.stopPropagation(); });
+    $b.querySelectorAll("[data-gcheck]").forEach(btn => { btn.onclick = e => { e.stopPropagation(); toggleGift(btn.dataset.gcheck, null); }; btn.onkeydown = e => e.stopPropagation(); });
+    $b.querySelectorAll("[data-gocc]").forEach(btn => { btn.onclick = e => { e.stopPropagation(); const [gid, occ] = btn.dataset.gocc.split(":"); toggleGift(gid, occ); }; });
     $b.querySelectorAll("[data-camt]").forEach(btn => { btn.onclick = e => { e.stopPropagation(); startInline(btn, "child"); }; btn.onkeydown = e => e.stopPropagation(); });
     window.NWUI.bindMini($b);
   }
