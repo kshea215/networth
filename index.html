@@ -101,13 +101,14 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
 .hero-export { position: absolute; right: 2px; top: 6px; border: 0; border-radius: 999px; padding: 6px 12px; background: var(--surface-2); color: var(--accent); font: inherit; font-size: 13px; font-weight: 700; display: inline-flex; align-items: center; gap: 6px; cursor: pointer; -webkit-tap-highlight-color: transparent; }
 .hero-export svg { width: 14px; height: 14px; }
 .hero-label { color: var(--muted); font-size: 15px; font-weight: 600; margin: 0; }
-.hero-total { font-size: clamp(44px, 13vw, 64px); font-weight: 800; letter-spacing: -0.02em; margin: 2px 0 4px; line-height: 1.05; }
+.col-a, .col-b { container-type: inline-size; }
+.hero-total { font-size: clamp(44px, 13vw, 64px); font-size: clamp(26px, 16cqw, 64px); font-weight: 800; letter-spacing: -0.02em; margin: 2px 0 4px; line-height: 1.05; }
 .hero-change { font-size: 15px; font-weight: 600; margin: 0; color: var(--muted); }
 .hero-change .up { color: var(--up); }
 .hero-change .down { color: var(--down); }
 
 /* Movers */
-.movers { display: flex; gap: 8px; margin-top: 14px; overflow-x: auto; scrollbar-width: none; }
+.movers { display: flex; gap: 8px; margin: 10px 0 -6px; padding: 4px 0 14px; overflow-x: auto; scrollbar-width: none; }
 .movers::-webkit-scrollbar { display: none; }
 .mover { flex: 1 0 auto; max-width: 70%; background: var(--surface); box-shadow: var(--shadow); border-radius: 14px; padding: 9px 12px; display: flex; flex-direction: column; min-width: 0; }
 .mover-name { font-size: 12px; color: var(--muted); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 160px; }
@@ -290,6 +291,17 @@ main { padding-bottom: calc(96px + env(safe-area-inset-bottom, 0px)) !important;
     overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; scrollbar-width: none;
     padding: 6px 14px 28px; margin: -6px -14px 0; }   /* the padding keeps card shadows from being clipped; the margin cancels it out */
   .cols .col-a::-webkit-scrollbar { display: none; }
+  .cols .col-a .movers { margin-left: -14px; margin-right: -14px; padding-left: 14px; padding-right: 14px; }
+}
+/* Net Worth and Budget keep their two columns on every screen size: the summary on the left, the lists on the right */
+@media (max-width: 599px) {
+  main { padding-left: 12px !important; padding-right: 12px !important; }
+  #app .cols, #budgetApp .cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); column-gap: 12px; align-items: start; }
+  #app .cols .col-a, #budgetApp .cols .col-a { position: sticky; top: calc(10px + env(safe-area-inset-top, 0px));
+    max-height: calc(100vh - 20px - env(safe-area-inset-top, 0px)); max-height: calc(100dvh - 20px - env(safe-area-inset-top, 0px));
+    overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; scrollbar-width: none;
+    padding: 6px 6px calc(110px + env(safe-area-inset-bottom, 0px)); margin: -6px -6px 0; }
+  .cols .col-a::-webkit-scrollbar { display: none; }
 }
 .b-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 11px 0; border-top: 1px solid var(--line); cursor: pointer; -webkit-tap-highlight-color: transparent; }
 .b-row.child { padding-left: 14px; }
@@ -462,6 +474,41 @@ details.history[open] summary::after { content: "Hide"; }
 .toast { position: fixed; left: 50%; bottom: calc(128px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); background: var(--btn); color: var(--btn-text); padding: 10px 16px; border-radius: 12px; font-weight: 700; font-size: 14px; opacity: 0; pointer-events: none; transition: opacity .2s; z-index: 30; max-width: 90vw; text-align: center; }
 .toast.show { opacity: 1; }
 .loading { color: var(--muted); padding: 40px 0; text-align: center; }
+
+/* Narrow columns (a phone, or two columns beside the sidebar): tighter type and rows, names may wrap */
+@container (max-width: 300px) {
+  .view-seg button { font-size: 12px; padding: 8px 2px; }
+  .hero-export { position: static; margin: 0 0 6px auto; }
+  .hero-label { font-size: 13px; }
+  .hero-change, .hero-equity { font-size: 13px; }
+  .mover { padding: 8px 10px; }
+  .mover-name { max-width: 110px; }
+  .group { padding: 4px 12px; }
+  .group-head { flex-wrap: wrap; gap: 2px 8px; }
+  .footer { flex-wrap: wrap; }
+  .footer button { flex: 1 1 100%; }
+  .group-head h2 { font-size: 13px; }
+  .group-head span { font-size: 15px; }
+  .row { gap: 8px; padding: 10px 0; }
+  .row-name { white-space: normal; font-size: 14px; }
+  .row .row-amt.amt-edit { min-width: 0; font-size: 14px; padding: 3px 8px; margin-right: -8px; }
+  .row-delta { font-size: 11px; }
+  .b-row { gap: 8px; }
+  .b-name { font-size: 14px; }
+  .b-row .b-amt { min-width: 0; font-size: 14px; padding: 4px 8px; margin-right: -8px; }
+  .alloc { padding: 12px; }
+  .alloc-legend { font-size: 12px; gap: 4px 10px; }
+  .pay-grid { grid-template-columns: 1fr; }
+  .card-title { font-size: 12px; }
+  .joint-line { font-size: 14px; }
+  .joint-item-name, .joint-item-amt { font-size: 13px; }
+  .datebar { flex-wrap: wrap; gap: 6px; }
+  .datebar label { flex-wrap: wrap; gap: 6px; }
+  .paste-link, .export-link { font-size: 13px; }
+  .ranges button { padding: 6px 8px; }
+  .primary, .secondary { font-size: 15px; }
+  .log-name, .log-amts { font-size: 13px; }
+}
 </style>
 </head>
 <body>
@@ -1524,6 +1571,8 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
   const exMoney = (n, dec = 0) => (n < 0 ? "−" : "") + "$" + Math.abs(n).toLocaleString("en-US", { minimumFractionDigits: dec, maximumFractionDigits: dec });
   const exSigned = n => (n < 0 ? "−" : "+") + "$" + Math.abs(Math.round(n)).toLocaleString("en-US");
   const exLong = iso => { const [y, m, d] = iso.split("-").map(Number); return new Date(y, m - 1, d).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }); };
+  const exPct = p => (Math.abs(p) >= 1000 ? (p < 0 ? "−" : "+") + ">999%" : (p < -0.049 ? "−" : p > 0.049 ? "+" : "") + Math.abs(p).toFixed(1) + "%");
+  const exPctCol = p => (p > 0.049 ? EX.up : p < -0.049 ? EX.down : EX.muted);
   const exAlpha = (hex, a) => { const n = parseInt(hex.slice(1), 16); return `rgba(${n >> 16 & 255},${n >> 8 & 255},${n & 255},${a})`; };
   function exRR(ctx, x, y, w, h, r) {
     ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r);
@@ -1575,6 +1624,8 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
     ctx.beginPath(); ctx.arc(x + 5, y + 9, 5, 0, Math.PI * 2); ctx.fillStyle = b.color; ctx.fill();
     exText(ctx, b.title, x + 20, y + 14, `700 15px ${EXF}`, EX.text);
     exText(ctx, b.total, x + w, y + 14, `700 15px ${EXF}`, b.totalColor || EX.text, "right");
+    const pctRight = x + w - (b.amtW || 0) - 14;        // one tidy column for the percentages
+    if (b.pct != null) exText(ctx, exPct(b.pct), b.amtW ? pctRight : x + w - 90, y + 14, `700 13px ${EXF}`, exPctCol(b.pct), "right");
     ctx.fillStyle = EX.line; ctx.fillRect(x, y + 24, w, 1);
     let ry = y + 44;
     b.rows.forEach(r => {
@@ -1583,7 +1634,14 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
       const col = child ? "rgba(245,245,247,0.62)" : calc ? EX.muted : group ? EX.text : "rgba(245,245,247,0.86)";
       ctx.font = font;
       const aw = ctx.measureText(r.amount).width, nx = x + (child ? 36 : 20);
-      exText(ctx, exFit(ctx, r.name, x + w - aw - 12 - nx), nx, ry, font, col);
+      let right = x + w - aw - 12;                       // where the name has to stop
+      if (r.pct != null) {
+        ctx.font = `600 12px ${EXF}`; const ptxt = exPct(r.pct), pw = ctx.measureText(ptxt).width;
+        const pr = b.amtW ? pctRight : x + w - aw - 14;
+        exText(ctx, ptxt, pr, ry, `600 12px ${EXF}`, exPctCol(r.pct), "right");
+        right = pr - pw - 10; ctx.font = font;
+      }
+      exText(ctx, exFit(ctx, r.name, right - nx), nx, ry, font, col);
       exText(ctx, r.amount, x + w, ry, font, r.neg ? EX.down : col, "right");
       ry += exRowH(r);
     });
@@ -1612,7 +1670,7 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
     exText(ctx, exMoney(d.nw), P, 122, `800 58px ${EXF}`, EX.text);
     let y = 154;
     if (d.change != null) {
-      const a = exSigned(d.change);
+      const a = exSigned(d.change) + (d.changePct != null ? ` (${exPct(d.changePct)})` : "");
       exText(ctx, a, P, y, `700 17px ${EXF}`, d.change >= 0 ? EX.up : EX.down);
       const w = ctx.measureText(a).width;
       exText(ctx, "  since " + d.prevLabel, P + w, y, `500 17px ${EXF}`, EX.muted);
@@ -1653,8 +1711,13 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
       });
       y += 34;
     }
-    y = exColumns(ctx, d.groups.map(g => ({ color: g.color, title: g.name, total: g.totalText, totalColor: g.kind === "liability" ? EX.down : EX.text, rows: g.rows })), P, y, inner, 32);
-    return exFooter(ctx, W, P, y, "As of " + d.dateLabel);
+    let amtW = 0;                                        // the widest amount anywhere, so every % lines up in one column
+    d.groups.forEach(g => {
+      ctx.font = `700 15px ${EXF}`; amtW = Math.max(amtW, ctx.measureText(g.totalText).width);
+      ctx.font = `500 13px ${EXF}`; g.rows.forEach(r => { amtW = Math.max(amtW, ctx.measureText(r.amount).width); });
+    });
+    y = exColumns(ctx, d.groups.map(g => ({ color: g.color, title: g.name, total: g.totalText, pct: g.pct, amtW, totalColor: g.kind === "liability" ? EX.down : EX.text, rows: g.rows })), P, y, inner, 32);
+    return exFooter(ctx, W, P, y, "As of " + d.dateLabel + (d.prevLabel ? "  ·  % change is versus " + d.prevLabel : ""));
   }
 
   function exPaintBudget(ctx, W, d) {
@@ -1693,7 +1756,7 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
   }
 
   function exRender(kind, data, scale) {
-    const W = 760, sc = scale || 2;
+    const W = 820, sc = scale || 2;
     const H = Math.ceil((kind === "nw" ? exPaintNW : exPaintBudget)(document.createElement("canvas").getContext("2d"), W, data));
     const c = document.createElement("canvas"); c.width = W * sc; c.height = H * sc;
     const ctx = c.getContext("2d"); ctx.scale(sc, sc);
@@ -1721,20 +1784,24 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
       const home = find("home", "asset"), mort = find("mortgage", "liability");
       const equity = home && mort && bal[home.id] != null && bal[mort.id] != null
         ? { value: bal[home.id] - bal[mort.id], pct: bal[home.id] ? Math.round(((bal[home.id] - bal[mort.id]) / bal[home.id]) * 100) : 0 } : null;
+      const pb = prev ? prev.balances : {};
+      const pctOf = (cur, old) => (old != null && Math.abs(old) > 0.5 ? ((cur - old) / Math.abs(old)) * 100 : null);   // liabilities count as negative numbers, so paying one down shows as a gain
       const groups = [];
       CATEGORIES.forEach(c => {
         const list = accts.filter(a => !a.archived && a.kind === c.kind && catOf(a) === c.id && bal[a.id] != null && Math.abs(bal[a.id]) >= 0.005);
         if (!list.length) return;
-        const total = list.reduce((t, a) => t + bal[a.id], 0), liab = c.kind === "liability";
-        const rows = list.map(a => ({ t: "row", name: a.name, amount: (liab ? "−" : "") + exMoney(bal[a.id]), neg: liab }));
+        const total = list.reduce((t, a) => t + bal[a.id], 0), liab = c.kind === "liability", sg = liab ? -1 : 1;
+        const rows = list.map(a => ({ t: "row", name: a.name, amount: (liab ? "−" : "") + exMoney(bal[a.id]), neg: liab,
+          pct: prev ? pctOf(sg * bal[a.id], pb[a.id] != null ? sg * pb[a.id] : null) : null }));
         if (c.id === "property" && equity) rows.push({ t: "calc", name: `Home equity (${equity.pct}%)`, amount: exMoney(equity.value) });
-        groups.push({ name: c.name, color: c.color || EX.down, kind: c.kind, totalText: (liab ? "−" : "") + exMoney(total), rows });
+        const prevTotal = prev ? list.reduce((t, a) => t + (pb[a.id] != null ? sg * pb[a.id] : 0), 0) : null;
+        groups.push({ name: c.name, color: c.color || EX.down, kind: c.kind, totalText: (liab ? "−" : "") + exMoney(total), pct: prev ? pctOf(sg * total, prevTotal) : null, rows });
       });
       const tOf = p => Date.parse(p.date + "T00:00:00");
       let pts = sr.filter(p => tOf(p) >= tOf(last) - 366 * 864e5);
       if (pts.length < 2) pts = sr.slice(-12);
       return { view: v, viewName: OWNERS.find(o => o[0] === v)[1], nw: last.nw, assets: last.assets, debts: last.liabilities,
-        change: prev ? last.nw - prev.nw : null, prevLabel: prev ? shortDate(prev.date) : "", dateLabel: exLong(last.date), cats, equity, groups,
+        change: prev ? last.nw - prev.nw : null, changePct: prev ? pctOf(last.nw, prev.nw) : null, prevLabel: prev ? shortDate(prev.date) : "", dateLabel: exLong(last.date), cats, equity, groups,
         points: pts.map(p => ({ t: tOf(p), v: p.nw })) };
     } finally { view = keep; }
   }
@@ -1949,7 +2016,7 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
     if (i) i.onchange = e => setChangeDate(e.target.value || null);
     if (t) t.onclick = () => setChangeDate(null);
   }
-  window.NWUI = { bindMini, changeDate, setChangeDate, dateBarHtml, bindDateBar, todayISO, openExport: (kind, v) => openExport(kind, v) };
+  window.NWUI = { bindMini, changeDate, setChangeDate, dateBarHtml, bindDateBar, todayISO, openExport: (kind, v) => openExport(kind, v), nwExportData };
 
   // Shared with the Budget tab
   window.NW = { readFile, writeFile, parseCSV, toCSV, toast, openSheet, closeSheet, esc,
