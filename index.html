@@ -97,7 +97,9 @@ button { font: inherit; color: inherit; cursor: pointer; }
 button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 /* Hero */
-.hero { padding: 8px 2px 4px; }
+.hero { padding: 8px 2px 4px; position: relative; }
+.hero-export { position: absolute; right: 2px; top: 6px; border: 0; border-radius: 999px; padding: 6px 12px; background: var(--surface-2); color: var(--accent); font: inherit; font-size: 13px; font-weight: 700; display: inline-flex; align-items: center; gap: 6px; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+.hero-export svg { width: 14px; height: 14px; }
 .hero-label { color: var(--muted); font-size: 15px; font-weight: 600; margin: 0; }
 .hero-total { font-size: clamp(44px, 13vw, 64px); font-weight: 800; letter-spacing: -0.02em; margin: 2px 0 4px; line-height: 1.05; }
 .hero-change { font-size: 15px; font-weight: 600; margin: 0; color: var(--muted); }
@@ -283,7 +285,10 @@ main { padding-bottom: calc(96px + env(safe-area-inset-bottom, 0px)) !important;
 @media (min-width: 600px) {
   main { max-width: 1040px !important; padding-left: 28px !important; padding-right: 28px !important; }
   .cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); column-gap: 28px; align-items: start; }
-  .cols .col-a { position: sticky; top: calc(14px + env(safe-area-inset-top, 0px)); }
+  .cols .col-a { position: sticky; top: calc(14px + env(safe-area-inset-top, 0px));
+    max-height: calc(100vh - 28px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px)); max-height: calc(100dvh - 28px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
+    overflow-y: auto; overscroll-behavior: contain; scrollbar-width: none; padding-bottom: 28px; }
+  .cols .col-a::-webkit-scrollbar { display: none; }
 }
 .b-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 11px 0; border-top: 1px solid var(--line); cursor: pointer; -webkit-tap-highlight-color: transparent; }
 .b-row.child { padding-left: 14px; }
@@ -1046,6 +1051,7 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
         ${OWNERS.map(([k, n]) => `<button data-view="${k}" aria-pressed="${view === k}">${n}</button>`).join("")}
       </div>
       <section class="hero">
+        <button class="hero-export" id="exportTopBtn" aria-label="Export net worth as an image"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 15V3"/><path d="M7 8l5-5 5 5"/><path d="M5 12v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7"/></svg>Export</button>
         <p class="hero-label">${view === "household" ? "Net worth" : view === "kyle" ? "Kyle’s net worth" : "Victoria’s net worth"}</p>
         <p class="hero-total num">${last ? fmt0.format(last.nw) : "$0"}</p>
         <p class="hero-change">${changeHtml}</p>
@@ -1078,6 +1084,7 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
     document.getElementById("updateBtn").onclick = openUpdate;
     document.getElementById("pasteBtn").onclick = openPaste;
     document.getElementById("exportImgBtn").onclick = () => openExport("nw", view);
+    document.getElementById("exportTopBtn").onclick = () => openExport("nw", view);
     bindDateBar($app);
     document.getElementById("manageBtn").onclick = openManage;
     document.getElementById("exportBtn").onclick = exportCSV;
@@ -2631,6 +2638,7 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
         ${VIEWS.map(([k, n]) => `<button data-bview="${k}" aria-pressed="${view === k}">${n}</button>`).join("")}
       </div>
       <section class="hero">
+        <button class="hero-export" id="bExportTop" aria-label="Export budget as an image"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 15V3"/><path d="M7 8l5-5 5 5"/><path d="M5 12v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7"/></svg>Export</button>
         <p class="hero-label">${label} monthly take-home</p>
         <p class="hero-total num">${fmt0.format(inc)}</p>
         <p class="hero-change">Budgeted <span class="num">${fmt.format(budgeted)}</span>. ${remainHtml}</p>
@@ -2687,6 +2695,7 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
     const jt = document.getElementById("jointToggle");
     if (jt) jt.onclick = () => { jointOpen = !jointOpen; render(); };
     document.getElementById("bExport").onclick = () => window.NWUI.openExport("budget", view);
+    document.getElementById("bExportTop").onclick = () => window.NWUI.openExport("budget", view);
     document.getElementById("bAdd").onclick = () => openItem(null);
     document.getElementById("bIncome").onclick = openIncome;
     $b.querySelectorAll("[data-amt]").forEach(btn => { btn.onclick = e => { e.stopPropagation(); startInline(btn, "item"); }; btn.onkeydown = e => e.stopPropagation(); });
