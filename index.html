@@ -52,9 +52,6 @@ window.WL_PREF = {
   --btn: #12141A; --btn-text: #FFFFFF;
   --shadow: 0 1px 2px rgba(18,20,26,.06), 0 8px 24px rgba(18,20,26,.06);
   color-scheme: light;
-  box-sizing: border-box;
-  padding-top: env(safe-area-inset-top, 0px);
-  padding-bottom: env(safe-area-inset-bottom, 0px);
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
@@ -79,10 +76,14 @@ window.WL_PREF = {
   color-scheme: dark;
 }
 *, *::before, *::after { box-sizing: inherit; }
-html { scroll-padding-top: env(safe-area-inset-top, 0px); }
+/* The page itself never scrolls. The app scrolls inside #scroller, so Safari's toolbar can't collapse and slide the tab bar,
+   and a change in the visible height can't make anything jump. */
+html, body { height: 100%; overflow: hidden; overscroll-behavior: none; }
+#scroller { position: fixed; inset: 0; box-sizing: border-box; overflow-y: auto; overflow-x: hidden; -webkit-overflow-scrolling: touch; overscroll-behavior-y: contain;
+  padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); scroll-padding-top: env(safe-area-inset-top, 0px); }
 body {
   margin: 0;
-  min-height: 100vh;
+  min-height: 0;
   background: linear-gradient(160deg, var(--bg-a), var(--bg-b)) fixed;
   background-color: var(--bg-a);
   color: var(--text);
@@ -101,7 +102,6 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
 .hero-export { position: absolute; right: 2px; top: 6px; border: 0; border-radius: 999px; padding: 6px 12px; background: var(--surface-2); color: var(--accent); font: inherit; font-size: 13px; font-weight: 700; display: inline-flex; align-items: center; gap: 6px; cursor: pointer; -webkit-tap-highlight-color: transparent; }
 .hero-export svg { width: 14px; height: 14px; }
 .hero-label { color: var(--muted); font-size: 15px; font-weight: 600; margin: 0; }
-.col-a, .col-b { container-type: inline-size; }
 .hero-total { font-size: clamp(44px, 13vw, 64px); font-size: clamp(26px, 16cqw, 64px); font-weight: 800; letter-spacing: -0.02em; margin: 2px 0 4px; line-height: 1.05; }
 .hero-change { font-size: 15px; font-weight: 600; margin: 0; color: var(--muted); }
 .hero-change .up { color: var(--up); }
@@ -204,6 +204,19 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
 .gift-occ { border: 0; border-radius: 999px; padding: 7px 12px; background: var(--surface-2); color: var(--muted); font-size: 13px; font-weight: 700; }
 .gift-occ.on { background: rgba(48, 209, 88, 0.16); color: var(--up); }
 
+/* Bills: how each one is paid */
+.bills-note { background: var(--surface); border-radius: 16px; padding: 12px 14px; margin-bottom: 14px; font-size: 14px; font-weight: 600; color: var(--muted); box-shadow: var(--shadow); }
+.bills-note b { color: var(--text); }
+.group-head .group-edit { border: 0; background: var(--surface-2); color: var(--accent); border-radius: 50%; width: 26px; height: 26px; padding: 0; font-size: 14px; font-weight: 700; margin-left: 8px; vertical-align: middle; line-height: 1; }
+.bill-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 11px 0; border-top: 1px solid var(--line); cursor: pointer; }
+.bill-name { font-weight: 600; min-width: 0; }
+.bill-name .b-sub { display: block; font-weight: 500; }
+.bill-amt { font-weight: 700; flex-shrink: 0; }
+.pw-list { display: flex; flex-direction: column; gap: 6px; margin: 10px 0 14px; max-height: 42vh; overflow-y: auto; }
+.pw-opt { display: flex; justify-content: space-between; align-items: center; gap: 10px; border: 0; border-radius: 14px; padding: 12px 14px; background: var(--surface-2); color: var(--text); font: inherit; font-size: 15px; font-weight: 600; text-align: left; }
+.pw-opt span { color: var(--muted); font-size: 13px; font-weight: 600; }
+.pw-opt.on { outline: 2px solid var(--accent); }
+
 /* Export as an image */
 .export-link { display: block; width: 100%; margin: -6px 0 18px; text-align: center; font-size: 14px; }
 .export-prev { margin: 12px 0; min-height: 120px; }
@@ -226,7 +239,7 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
 :root { --side-w: 208px; }
 .sidebar { display: none; }
 @media (min-width: 820px) {
-  html:not([data-nav="bottom"]) { padding-left: var(--side-w); }
+  html:not([data-nav="bottom"]) #scroller { left: var(--side-w); }
   html:not([data-nav="bottom"]) .tabbar { display: none; }
   html:not([data-nav="bottom"]) .sidebar {
     display: flex; flex-direction: column; gap: 4px; position: fixed; z-index: 15; left: 0; top: 0; bottom: 0; width: var(--side-w); box-sizing: border-box;
@@ -288,7 +301,7 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
 .tabbar button {
   border: 0; background: transparent; color: var(--muted);
   display: flex; flex-direction: column; align-items: center; gap: 2px;
-  min-width: 92px; padding: 7px 12px; border-radius: 999px;
+  min-width: 74px; padding: 7px 8px; border-radius: 999px;
   font-size: 11px; font-weight: 700; -webkit-tap-highlight-color: transparent;
   transition: background .18s, color .18s;
 }
@@ -296,28 +309,18 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
 .tabbar svg { width: 22px; height: 22px; }
 main { padding-bottom: calc(96px + env(safe-area-inset-bottom, 0px)) !important; }
 
-/* Two columns on wide screens (iPhone Duo inner display, iPad, landscape) */
+/* One column on every screen size. The whole-or-nothing scroll is the page's; the selector and the amount stay pinned at the top. */
 .col { min-width: 0; }
-@media (min-width: 600px) {
-  main { max-width: 1040px !important; padding-left: 28px !important; padding-right: 28px !important; }
-  .cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); column-gap: 28px; align-items: start; }
-  .cols .col-a { position: sticky; top: calc(14px + env(safe-area-inset-top, 0px));
-    max-height: calc(100vh - 28px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px)); max-height: calc(100dvh - 28px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
-    overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; scrollbar-width: none;
-    padding: 6px 14px 28px; margin: -6px -14px 0; }   /* the padding keeps card shadows from being clipped; the margin cancels it out */
-  .cols .col-a::-webkit-scrollbar { display: none; }
-  .cols .col-a .movers { margin-left: -14px; margin-right: -14px; padding-left: 14px; padding-right: 14px; }
-}
-/* Net Worth and Budget keep their two columns on every screen size: the summary on the left, the lists on the right */
-@media (max-width: 599px) {
-  main { padding-left: 12px !important; padding-right: 12px !important; }
-  #app .cols, #budgetApp .cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); column-gap: 12px; align-items: start; }
-  #app .cols .col-a, #budgetApp .cols .col-a { position: sticky; top: calc(10px + env(safe-area-inset-top, 0px));
-    max-height: calc(100vh - 20px - env(safe-area-inset-top, 0px)); max-height: calc(100dvh - 20px - env(safe-area-inset-top, 0px));
-    overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; scrollbar-width: none;
-    padding: 6px 6px calc(110px + env(safe-area-inset-bottom, 0px)); margin: -6px -6px 0; }
-  .cols .col-a::-webkit-scrollbar { display: none; }
-}
+main { --page-pad: 18px; }
+@media (min-width: 600px) { main { --page-pad: 28px; max-width: 760px !important; padding-left: 28px !important; padding-right: 28px !important; } }
+.stickyhead { position: sticky; top: 0; z-index: 12; margin: 0 calc(-1 * var(--page-pad)) 12px; padding: 8px var(--page-pad) 10px;
+  background: color-mix(in srgb, var(--bg-a) 84%, transparent); -webkit-backdrop-filter: blur(18px) saturate(160%); backdrop-filter: blur(18px) saturate(160%); }
+.stickyhead .view-seg { margin: 0; }
+.stickyhead .hero { position: static; display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "label export" "total change"; align-items: end; column-gap: 12px; row-gap: 0; padding: 8px 0 0; }
+.stickyhead .hero-label { grid-area: label; font-size: 13px; margin: 0; align-self: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.stickyhead .hero-total { grid-area: total; font-size: clamp(32px, 11vw, 46px); margin: 0; line-height: 1.05; min-width: 0; }
+.stickyhead .hero-change { grid-area: change; margin: 0; font-size: 14px; text-align: right; padding-bottom: 6px; max-width: 46vw; }
+.stickyhead .hero-export { grid-area: export; position: static; margin: 0; }
 .b-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 11px 0; border-top: 1px solid var(--line); cursor: pointer; -webkit-tap-highlight-color: transparent; }
 .b-row.child { padding-left: 14px; }
 .b-row.child .b-name { font-weight: 500; }
@@ -534,9 +537,12 @@ details.history[open] summary::after { content: "Hide"; }
 </style>
 </head>
 <body>
+<div id="scroller">
 <main id="app"><p class="loading">Loading…</p></main>
 <main id="budgetApp" hidden><p class="loading">Loading…</p></main>
+<main id="billsApp" hidden><p class="loading">Loading…</p></main>
 <main id="settingsApp" hidden><p class="loading">Loading…</p></main>
+</div>
 <button class="sync-pill" id="syncPill" hidden></button>
 <nav class="tabbar" aria-label="Sections">
   <button data-tab="nw" aria-pressed="true">
@@ -546,6 +552,10 @@ details.history[open] summary::after { content: "Hide"; }
   <button data-tab="budget" aria-pressed="false">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M3 9h18"/><path d="M8 14h3"/><path d="M8 17h6"/></svg>
     <span>Budget</span>
+  </button>
+  <button data-tab="bills" aria-pressed="false">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6"/><path d="M9 12h6"/></svg>
+    <span>Bills</span>
   </button>
   <button data-tab="settings" aria-pressed="false">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h10"/><path d="M18 6h2"/><circle cx="16" cy="6" r="2"/><path d="M4 12h4"/><path d="M12 12h8"/><circle cx="10" cy="12" r="2"/><path d="M4 18h12"/><path d="M20 18h0"/><circle cx="18" cy="18" r="2"/></svg>
@@ -561,6 +571,10 @@ details.history[open] summary::after { content: "Hide"; }
   <button data-tab="budget" aria-pressed="false">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M3 9h18"/><path d="M8 14h3"/><path d="M8 17h6"/></svg>
     <span>Budget</span>
+  </button>
+  <button data-tab="bills" aria-pressed="false">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6"/><path d="M9 12h6"/></svg>
+    <span>Bills</span>
   </button>
   <button data-tab="settings" aria-pressed="false">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h10"/><path d="M18 6h2"/><circle cx="16" cy="6" r="2"/><path d="M4 12h4"/><path d="M12 12h8"/><circle cx="10" cy="12" r="2"/><path d="M4 18h12"/><path d="M20 18h0"/><circle cx="18" cy="18" r="2"/></svg>
@@ -1006,7 +1020,7 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
 
   // ---------- rendering ----------
   function render() {                                    // redraw, but keep the pinned left column where it was scrolled to
-    const ca = $app.querySelector(".col-a"), keep = ca ? ca.scrollTop : 0, keepY = window.scrollY;
+    const ca = $app.querySelector(".col-a"), keep = ca ? ca.scrollTop : 0, keepY = scroller.scrollTop;
     renderCore();
     const na = $app.querySelector(".col-a");
     if (na && keep) na.scrollTop = keep;
@@ -1123,17 +1137,18 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
     const miniHtml = `<div class="mini" role="button" aria-label="Back to top"><div class="mini-main"><span class="mini-label">${view === "household" ? "Net worth" : view === "kyle" ? "Kyle" : "Victoria"}</span>
       <span class="mini-num num">${last ? fmt0.format(last.nw) : "$0"}</span></div>
       <span class="mini-side num ${miniD !== null && miniD >= 0 ? "up" : "down"}">${miniD !== null ? signed(miniD) : ""}</span></div>`;
-    $app.innerHTML = `${miniHtml}<div class="cols"><div class="col col-a">
-      <div class="seg view-seg" role="group" aria-label="Whose accounts">
-        ${OWNERS.map(([k, n]) => `<button data-view="${k}" aria-pressed="${view === k}">${n}</button>`).join("")}
+    $app.innerHTML = `<div class="cols">
+      <div class="stickyhead">
+        <div class="seg view-seg" role="group" aria-label="Whose accounts">
+          ${OWNERS.map(([k, n]) => `<button data-view="${k}" aria-pressed="${view === k}">${n}</button>`).join("")}
+        </div>
+        <section class="hero">
+          <p class="hero-label">${view === "household" ? "Net worth" : view === "kyle" ? "Kyle’s net worth" : "Victoria’s net worth"}</p>
+          <button class="hero-export" id="exportTopBtn" aria-label="Export net worth as an image"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 15V3"/><path d="M7 8l5-5 5 5"/><path d="M5 12v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7"/></svg>Export</button><p class="hero-total num">${last ? fmt0.format(last.nw) : "$0"}</p><p class="hero-change">${changeHtml}</p>
+        </section>
       </div>
-      <section class="hero">
-        <button class="hero-export" id="exportTopBtn" aria-label="Export net worth as an image"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 15V3"/><path d="M7 8l5-5 5 5"/><path d="M5 12v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7"/></svg>Export</button>
-        <p class="hero-label">${view === "household" ? "Net worth" : view === "kyle" ? "Kyle’s net worth" : "Victoria’s net worth"}</p>
-        <p class="hero-total num">${last ? fmt0.format(last.nw) : "$0"}</p>
-        <p class="hero-change">${changeHtml}</p>
-        ${heroEquity()}
-      </section>
+      <div class="col col-a">
+      ${heroEquity()}
       ${moversHtml}
       <div class="chart-wrap" id="chartWrap"></div>
       <div class="bars-wrap" id="barsWrap"></div>
@@ -2028,7 +2043,7 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
     const io = new IntersectionObserver(([e]) => mini.classList.toggle("show", !e.isIntersecting && e.boundingClientRect.top < 0), { threshold: 0 });
     io.observe(hero);
     miniObservers.set(container, io);
-    mini.onclick = () => window.scrollTo({ top: 0, behavior: "smooth" });
+    mini.onclick = () => scroller.scrollTo({ top: 0, behavior: "smooth" });
   }
   // The date used for changes made from the lists. It's today unless you pick another, and resets when the app reopens.
   let changeDateOverride = null;
@@ -2050,11 +2065,12 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
   }
   // After a redraw, keep the page at the scroll position it had. Some phones reset it to the top when the list is rebuilt,
   // so for a moment after each redraw we put it back, unless you've started scrolling yourself.
+  const scroller = document.getElementById("scroller");
   const scrollHold = { y: 0, until: 0, touched: false, running: false };
   function holdScroll(y) {
     if (y < 40) return;
     scrollHold.y = y; scrollHold.until = performance.now() + 700; scrollHold.touched = false;
-    window.scrollTo(0, y);
+    scroller.scrollTo(0, y);
     if (scrollHold.running) return;
     scrollHold.running = true;
     const mark = () => { scrollHold.touched = true; };
@@ -2064,12 +2080,12 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
       if (scrollHold.touched || performance.now() > scrollHold.until) {
         window.removeEventListener("touchstart", mark); window.removeEventListener("wheel", mark); scrollHold.running = false; return;
       }
-      if (Math.abs(window.scrollY - scrollHold.y) > 2) window.scrollTo(0, scrollHold.y);
+      if (Math.abs(scroller.scrollTop - scrollHold.y) > 2) scroller.scrollTo(0, scrollHold.y);
       requestAnimationFrame(step);
     };
     requestAnimationFrame(step);
   }
-  const retargetHold = () => { if (scrollHold.running) scrollHold.y = window.scrollY; };
+  const retargetHold = () => { if (scrollHold.running) scrollHold.y = scroller.scrollTop; };
 
   // Redraw after an expand/collapse without the screen shifting under your finger: the row you tapped stays where it was,
   // even when another row above it closes at the same moment. Nothing else scrolls on its own.
@@ -2078,11 +2094,12 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
     redraw();
     const now = findAgain();
     if (!now) return;
-    const sc = now.closest(".col-a"), shift = d => { if (Math.abs(d) < 1) return; if (sc) sc.scrollTop += d; else window.scrollBy(0, d); };
+    const shift = d => { if (Math.abs(d) < 1) return; scroller.scrollBy(0, d); };
     shift(now.getBoundingClientRect().top - before);
     retargetHold();
   }
-  window.NWUI = { anchorRender, holdScroll, bindMini, changeDate, setChangeDate, dateBarHtml, bindDateBar, todayISO, openExport: (kind, v) => openExport(kind, v), nwExportData };
+  window.NWUI = { anchorRender, holdScroll, bindMini, changeDate, setChangeDate, dateBarHtml, bindDateBar, todayISO, openExport: (kind, v) => openExport(kind, v), nwExportData,
+    cardNames: () => state.accounts.filter(a => !a.archived && a.kind === "liability" && catOf(a) === "cards").map(a => a.name.replace(/\s+credit card$/i, "")) };
 
   // Shared with the Budget tab
   window.NW = { readFile, writeFile, parseCSV, toCSV, toast, openSheet, closeSheet, esc,
@@ -2188,6 +2205,8 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
   // Budget lines that add up from a detailed list
   const autoSource = name => ({ "deferred savings": "deferred", "joint deferred": "deferred-joint", "pets": "pets", "gift savings": "gifts", "mortgage/rent": "mortgage", "principal & interest": "mortgage" })[String(name).trim().toLowerCase()] || "";
   let view = WL_PREF.get("budgetView", "household"), openGroups = new Set(), openId = null, chain = Promise.resolve();
+  const $bills = document.getElementById("billsApp");
+  let billsView = WL_PREF.get("billsView", "household");
   let jointOpen = false;
   let log = [], baseline = { items: new Map(), settings: {} }, changeNote = "", logOpen = false, logShown = 40;
   const logOpenItems = new Set();       // which budget items are expanded in the change log
@@ -2207,14 +2226,16 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
     document.querySelectorAll("[data-tab]").forEach(b => b.setAttribute("aria-pressed", b.dataset.tab === tab));
     $nw.hidden = tab !== "nw";
     $b.hidden = tab !== "budget";
+    $bills.hidden = tab !== "bills";
     document.getElementById("settingsApp").hidden = tab !== "settings";
-    if (tab === "budget" && ready && !loaded && !loading) load();
+    if ((tab === "budget" || tab === "bills") && ready && !loaded && !loading) load();
+    if (tab === "bills") renderBills();
     if (tab === "settings" && window.SETTINGS) window.SETTINGS.render();
-    window.scrollTo(0, 0);
+    document.getElementById("scroller").scrollTo(0, 0);
   });
   window.addEventListener("nw-ready", () => {
     ready = true;
-    if ((!$b.hidden || !document.getElementById("settingsApp").hidden) && !loaded && !loading) load();
+    if ((!$b.hidden || !$bills.hidden || !document.getElementById("settingsApp").hidden) && !loaded && !loading) load();
   });
   window.BUDGET = {
     async ensure() {
@@ -2435,6 +2456,115 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
   // Budget lines that add up from a detailed list (or from the home loan)
   const hasDetail = it => (it.source === "deferred" || it.source === "deferred-joint") ? funds.length > 0
     : it.source === "pets" ? pets.length > 0 : it.source === "gifts" ? gifts.length > 0 : it.source === "mortgage" ? loanReady() : false;
+
+  // ---------- Bills: how each one is paid, and which bills are paid the same way ----------
+  const PAID_PRESETS = ["Joint account autopay", "Joint account ACH", "Venmo (Victoria reimburses)", "Pay manually"];
+  const BILL_COLORS = ["#64D2FF", "#30D158", "#FF9F0A", "#BF5AF2", "#FFD60A", "#FF453A", "#5E5CE6", "#40C8E0", "#AC8E68", "#FF6482"];
+  const billTag = i => (i.method || "").trim() || (i.joint ? "Joint account" : "");   // no tag but flagged as joint: it's paid from the joint account
+
+  function billsData() {
+    const keep = view; view = billsView;
+    try {
+      const list = items.filter(i => i.section !== "savings" && amt(i) > 0.004)
+        .map(i => ({ id: i.id, label: i.name, group: i.group || "", amount: amt(i), joint: !!i.joint, tag: billTag(i), fromFlag: !(i.method || "").trim() && !!i.joint }));
+      const map = new Map();
+      list.forEach(b => {
+        const k = b.tag.toLowerCase();
+        if (!map.has(k)) map.set(k, { key: k, spell: new Map(), rows: [], total: 0 });
+        const g = map.get(k); g.rows.push(b); g.total += b.amount; g.spell.set(b.tag, (g.spell.get(b.tag) || 0) + 1);
+      });
+      const groups = [...map.values()].map(g => ({ key: g.key, tagged: g.key !== "", name: g.key === "" ? "Not tagged" : [...g.spell.entries()].sort((a, c) => c[1] - a[1])[0][0],
+        rows: g.rows.sort((a, c) => c.amount - a.amount), total: g.total }));
+      groups.sort((a, c) => (a.tagged === c.tagged ? c.total - a.total : a.tagged ? -1 : 1));
+      groups.forEach((g, i) => { g.color = g.tagged ? BILL_COLORS[i % BILL_COLORS.length] : "#8E8E93"; });
+      return { groups, total: groups.reduce((t, g) => t + g.total, 0), count: list.length };
+    } finally { view = keep; }
+  }
+  // Every way of paying already in use, plus a few suggestions and your credit cards
+  function paidWithChoices() {
+    const seen = new Map(), counts = new Map();
+    items.forEach(i => { const t = (i.method || "").trim(); if (t) { const k = t.toLowerCase(); if (!seen.has(k)) seen.set(k, t); counts.set(k, (counts.get(k) || 0) + 1); } });
+    [...PAID_PRESETS, ...(window.NWUI.cardNames ? window.NWUI.cardNames() : [])].forEach(t => { const k = t.toLowerCase(); if (!seen.has(k)) seen.set(k, t); });
+    return [...seen.entries()].map(([k, t]) => ({ name: t, count: counts.get(k) || 0 })).sort((a, c) => c.count - a.count || a.name.localeCompare(c.name));
+  }
+
+  function renderBills() {
+    if (!loaded || !$bills) return;
+    const a = api(), esc = a.esc, d = billsData();
+    const label = billsView === "household" ? "Household" : billsView === "kyle" ? "Kyle’s" : "Victoria’s";
+    const tagged = d.groups.filter(g => g.tagged), untagged = d.groups.find(g => !g.tagged);
+    const ways = tagged.length;
+    const groupHtml = g => `<section class="group" data-pwgroup="${esc(g.key)}">
+        <div class="group-head"><h2><i class="dot" style="background:${g.color}"></i>${esc(g.name)} <span class="b-sub">${g.rows.length}</span>${g.tagged ? `<button class="group-edit" data-prename="${esc(g.key)}" aria-label="Rename ${esc(g.name)}" title="Rename">✎</button>` : ""}</h2>
+          <span class="num">${fmt.format(g.total)}</span></div>
+        ${g.rows.map(b => { const sub = [b.group, b.joint && g.key !== "joint account" ? "Joint account" : "", b.fromFlag ? "tagged by the joint switch" : ""].filter(Boolean).join(" · ");
+          return `<div class="bill-row" data-bill="${b.id}" role="button" tabindex="0" aria-label="${esc(b.group ? b.group + " " : "")}${esc(b.label)}: change how it’s paid">
+          <div class="bill-name">${esc(b.label)}${sub ? `<span class="b-sub">${esc(sub)}</span>` : ""}</div>
+          <div class="bill-amt num">${fmt.format(b.amount)}</div></div>`; }).join("")}</section>`;
+    $bills.innerHTML = `<div class="cols">
+      <div class="stickyhead">
+        <div class="seg view-seg" role="group" aria-label="Whose bills">${VIEWS.map(([id, name]) => `<button data-bill-view="${id}" aria-pressed="${id === billsView}">${name}</button>`).join("")}</div>
+        <section class="hero">
+          <p class="hero-label">${billsView === "household" ? "Monthly bills" : label + " bills"}</p>
+          <p class="hero-total num">${fmt0.format(d.total)}</p><p class="hero-change" style="color:var(--muted)">${d.count} bill${d.count === 1 ? "" : "s"} · ${ways} way${ways === 1 ? "" : "s"}</p>
+        </section>
+      </div>
+      <div class="col col-a">
+      ${d.total ? `<section class="alloc" aria-label="How your bills are paid">
+        <div class="alloc-bar">${d.groups.map(g => `<span style="width:${(g.total / d.total) * 100}%;background:${g.color}" title="${esc(g.name)}"></span>`).join("")}</div>
+        <div class="alloc-legend">${d.groups.map(g => `<span><i class="dot" style="background:${g.color}"></i>${esc(g.name)} <b class="num">${fmt0.format(g.total)}</b></span>`).join("")}</div></section>` : ""}
+      ${untagged ? `<div class="bills-note"><b>${untagged.rows.length} bill${untagged.rows.length === 1 ? "" : "s"}</b> ${untagged.rows.length === 1 ? "isn’t" : "aren’t"} tagged yet. Tap ${untagged.rows.length === 1 ? "it" : "one"} to say how ${untagged.rows.length === 1 ? "it’s" : "they’re"} paid.</div>` : ""}
+      <p class="paste-note">Tap any bill to change how it’s paid. Savings transfers aren’t included.</p>
+    </div><div class="col col-b">${d.groups.length ? d.groups.map(groupHtml).join("") : `<section class="notice"><h2>No bills yet</h2><p>Add budget lines on the Budget tab and they’ll show up here.</p></section>`}</div></div>`;
+    $bills.querySelectorAll("[data-bill-view]").forEach(b => b.onclick = () => { billsView = b.dataset.billView; WL_PREF.set("billsView", billsView); renderBills(); });
+    $bills.querySelectorAll("[data-bill]").forEach(r => {
+      const go = () => openPaidWith(r.dataset.bill);
+      r.onclick = go; r.onkeydown = e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); go(); } };
+    });
+    $bills.querySelectorAll("[data-prename]").forEach(b => b.onclick = e => { e.stopPropagation(); openRenameWay(b.dataset.prename); });
+  }
+
+  // Pick how one bill is paid: an existing way, a new one, or none
+  function openPaidWith(id) {
+    const it = items.find(x => x.id === id);
+    if (!it) return;
+    const a = api(), esc = a.esc, cur = (it.method || "").trim().toLowerCase();
+    const choices = paidWithChoices();
+    a.openSheet(`
+      <div class="sheet-top"><h2>Paid with</h2><button class="text-btn" id="pwClose">Cancel</button></div>
+      <p class="step-kind">${esc(it.group ? it.group + " · " + it.name : it.name)}</p>
+      <div class="pw-list">
+        ${choices.map(c => `<button class="pw-opt${c.name.toLowerCase() === cur ? " on" : ""}" data-pw="${esc(c.name)}">${esc(c.name)}<span>${c.count ? c.count + " bill" + (c.count === 1 ? "" : "s") : ""}</span></button>`).join("")}
+        <button class="pw-opt${!cur ? " on" : ""}" data-pw="">Not tagged<span>${it.joint ? "joint account switch only" : ""}</span></button>
+      </div>
+      ${field("pwNew", "Or a new way to pay", "")}
+      <button class="primary" id="pwUse">Use this</button>`);
+    const sheet = document.getElementById("sheet");
+    const apply = async value => { it.method = value.trim(); a.closeSheet(); render(); await save(); };
+    document.getElementById("pwClose").onclick = a.closeSheet;
+    sheet.querySelectorAll("[data-pw]").forEach(b => b.onclick = () => apply(b.dataset.pw));
+    document.getElementById("pwUse").onclick = () => { const v = document.getElementById("pwNew").value.trim(); if (!v) { a.toast("Type a name, or tap one above"); return; } apply(v); };
+  }
+
+  // Rename a way of paying everywhere it's used (or merge it into another by giving it that name)
+  function openRenameWay(key) {
+    const a = api(), esc = a.esc;
+    const members = items.filter(i => billTag(i).toLowerCase() === key);
+    if (!members.length) return;
+    const nameNow = members.map(i => billTag(i))[0];
+    a.openSheet(`
+      <div class="sheet-top"><h2>Rename</h2><button class="text-btn" id="rnClose">Cancel</button></div>
+      <p class="step-kind">${members.length} bill${members.length === 1 ? "" : "s"} paid with “${esc(nameNow)}”. Using a name that already exists merges them.</p>
+      ${field("rnName", "New name", esc(nameNow))}
+      <button class="primary" id="rnSave">Rename</button>`);
+    document.getElementById("rnClose").onclick = a.closeSheet;
+    document.getElementById("rnSave").onclick = async () => {
+      const v = document.getElementById("rnName").value.trim();
+      if (!v) { a.toast("Type a name"); return; }
+      members.forEach(i => { i.method = v; });
+      a.closeSheet(); render(); await save();
+    };
+  }
 
   // ---------- change log ----------
   const LOG_HEAD = ["id", "date", "logged_at", "item_id", "item", "kyle_old", "kyle_new", "victoria_old", "victoria_new", "note"];
@@ -2741,11 +2871,12 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
   }
 
   function render() {                                    // redraw, but keep the pinned left column where it was scrolled to
-    const ca = $b.querySelector(".col-a"), keep = ca ? ca.scrollTop : 0, keepY = window.scrollY;
+    const ca = $b.querySelector(".col-a"), keep = ca ? ca.scrollTop : 0, keepY = document.getElementById("scroller").scrollTop;
     renderCore();
     const na = $b.querySelector(".col-a");
     if (na && keep) na.scrollTop = keep;
     window.NWUI.holdScroll(keepY);
+    renderBills();
   }
   function renderCore() {
     if (!loaded) return;
@@ -2834,17 +2965,18 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
 
     const miniB = `<div class="mini" role="button" aria-label="Back to top"><div class="mini-main"><span class="mini-label">Budgeted</span>
       <span class="mini-num num">${fmt.format(budgeted)}</span></div><span class="mini-side num">${Math.abs(remaining) < 0.01 ? `<span class="b-pos">All assigned</span>` : remaining > 0 ? `<span class="b-pos">${fmt.format(remaining)} left</span>` : `<span class="b-neg">${fmt.format(-remaining)} over</span>`}</span></div>`;
-    $b.innerHTML = `${miniB}<div class="cols"><div class="col col-a">
-      <div class="seg view-seg" role="group" aria-label="Whose budget">
-        ${VIEWS.map(([k, n]) => `<button data-bview="${k}" aria-pressed="${view === k}">${n}</button>`).join("")}
+    $b.innerHTML = `<div class="cols">
+      <div class="stickyhead">
+        <div class="seg view-seg" role="group" aria-label="Whose budget">
+          ${VIEWS.map(([k, n]) => `<button data-bview="${k}" aria-pressed="${view === k}">${n}</button>`).join("")}
+        </div>
+        <section class="hero">
+          <p class="hero-label">${view === "household" ? "Monthly take-home" : label + " take-home"}</p>
+          <button class="hero-export" id="bExportTop" aria-label="Export budget as an image"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 15V3"/><path d="M7 8l5-5 5 5"/><path d="M5 12v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7"/></svg>Export</button><p class="hero-total num">${fmt0.format(inc)}</p><p class="hero-change">${remainHtml}</p>
+        </section>
       </div>
-      <section class="hero">
-        <button class="hero-export" id="bExportTop" aria-label="Export budget as an image"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 15V3"/><path d="M7 8l5-5 5 5"/><path d="M5 12v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7"/></svg>Export</button>
-        <p class="hero-label">${label} monthly take-home</p>
-        <p class="hero-total num">${fmt0.format(inc)}</p>
-        <p class="hero-change">Budgeted <span class="num">${fmt.format(budgeted)}</span>. ${remainHtml}</p>
-        <p class="hero-equity">Savings rate <b class="num">${(rate * 100).toFixed(1)}%</b></p>
-      </section>
+      <div class="col col-a">
+      <p class="hero-equity">Budgeted <b class="num">${fmt.format(budgeted)}</b> · Savings rate <b class="num">${(rate * 100).toFixed(1)}%</b></p>
       <div style="height:14px"></div>
       ${allocHtml}${payHtml}${jointHtml}
       </div><div class="col col-b">
@@ -3015,6 +3147,8 @@ const CLIENT_ID = "ca35613d-1cc6-4ddc-b020-b85fe7f9ef63";
       <button class="primary" id="bsave">${id ? "Save" : "Add item"}</button>
       ${id ? `<button class="secondary danger" id="bdel" style="width:100%">Delete item</button>` : ""}`);
     const $s = document.getElementById("sheet");
+    const bm = document.getElementById("bm");
+    if (bm) { bm.setAttribute("list", "pwList"); bm.insertAdjacentHTML("afterend", `<datalist id="pwList">${paidWithChoices().map(c => `<option value="${a.esc(c.name)}"></option>`).join("")}</datalist>`); }
     $s.querySelectorAll("[data-j]").forEach(b => b.onclick = () => {
       joint = b.dataset.j === "1";
       $s.querySelectorAll("[data-j]").forEach(x => x.setAttribute("aria-pressed", (x.dataset.j === "1") === joint));
